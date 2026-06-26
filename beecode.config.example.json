@@ -1,0 +1,7 @@
+{
+  "apiKey": "sk-your-key-here",
+  "baseUrl": "https://beecode.cc",
+  "model": "gpt-image-2",
+  "size": "1024x1024",
+  "concurrency": 3
+}

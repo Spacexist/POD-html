@@ -1,0 +1,1731 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>印花图提取</title>
+  <style>
+    :root {
+      --bg: #111111;
+      --panel: #181818;
+      --panel-soft: #202020;
+      --line: #2e2e2e;
+      --text: #f2f5fa;
+      --muted: #9aa3ad;
+      --orange: #ff7a3d;
+      --green: #00b86b;
+      --blue: #9ed4ff;
+      --red: #ff625d;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Microsoft YaHei", "Segoe UI", Arial, sans-serif;
+      letter-spacing: 0;
+    }
+
+    button, textarea { font: inherit; }
+
+    button {
+      height: 34px;
+      border: 1px solid #3a3a3a;
+      border-radius: 6px;
+      background: #171717;
+      color: var(--text);
+      padding: 0 14px;
+      cursor: pointer;
+    }
+
+    button:hover { border-color: #555; }
+    button.primary { border-color: var(--orange); background: var(--orange); color: #fff; font-weight: 700; }
+    button.text-action { height: auto; border: 0; background: transparent; color: var(--orange); padding: 0; text-align: left; }
+    button.text-action:hover { color: #ff9a68; }
+    button:disabled { cursor: not-allowed; opacity: 0.55; }
+
+    .app {
+      width: 100%;
+      min-height: 100vh;
+      padding: 18px 22px 24px;
+      overflow: auto;
+    }
+
+    .head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 12px;
+    }
+
+    h1 {
+      position: relative;
+      margin: 0;
+      padding-bottom: 8px;
+      font-size: 22px;
+      line-height: 1.2;
+      font-weight: 700;
+    }
+
+    h1::after {
+      content: "";
+      position: absolute;
+      left: 0;
+      bottom: 0;
+      width: 62px;
+      height: 2px;
+      background: #6edbd2;
+    }
+
+    .title-zone {
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      min-width: 0;
+    }
+
+    .config-line {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 280px;
+    }
+
+    .config-status {
+      max-width: 360px;
+      color: var(--muted);
+      font-size: 12px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 10px;
+    }
+
+    .prompt-wrap {
+      margin-bottom: 12px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--panel);
+      padding: 12px;
+    }
+
+    .prompt-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 8px;
+    }
+
+    .prompt-label {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .prompt-tools {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .option-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .range-control {
+      width: 140px;
+      accent-color: var(--orange);
+    }
+
+    .ratio-buttons {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .ratio-button {
+      height: 28px;
+      padding: 0 10px;
+      border-radius: 4px;
+    }
+
+    .ratio-button.active {
+      border-color: var(--orange);
+      background: rgba(255, 122, 61, 0.18);
+      color: #fff;
+    }
+
+    .folder-name {
+      max-width: 180px;
+      color: var(--muted);
+      font-size: 12px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .merge-status {
+      max-width: 240px;
+      color: var(--blue);
+      font-size: 12px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    textarea {
+      width: 100%;
+      height: 76px;
+      min-height: 64px;
+      border: 1px solid #333;
+      border-radius: 6px;
+      background: #101010;
+      color: var(--text);
+      padding: 10px 12px;
+      line-height: 1.5;
+      resize: vertical;
+      outline: none;
+    }
+
+    textarea:focus { border-color: var(--orange); }
+
+    .progress-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+
+    .progress {
+      flex: 1;
+      height: 8px;
+      border-radius: 999px;
+      background: #292929;
+      overflow: hidden;
+    }
+
+    .bar { width: 0%; height: 100%; background: var(--orange); transition: width 0.2s ease; }
+    .progress-text { width: 86px; color: var(--blue); font-size: 13px; text-align: right; }
+
+    .table {
+      min-width: 2040px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      overflow: hidden;
+      background: var(--panel);
+    }
+
+    .thead, .task-row {
+      display: grid;
+      grid-template-columns: 96px 500px 500px 140px 360px minmax(320px, 1fr) 126px;
+    }
+
+    .thead {
+      min-height: 54px;
+      background: #1d1d1d;
+      color: #eaf3ff;
+      font-size: 14px;
+      font-weight: 700;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .task-row {
+      min-height: 310px;
+      background: #151515;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .task-row:last-child { border-bottom: 0; }
+
+    .th, .td {
+      display: flex;
+      align-items: center;
+      min-width: 0;
+      padding: 14px 16px;
+      border-right: 1px solid #282828;
+    }
+
+    .th:last-child, .td:last-child { border-right: 0; }
+    .task-row .td:nth-child(1), .task-row .td:nth-child(2), .task-row .td:nth-child(3) { justify-content: center; }
+
+    .code-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 54px;
+      max-width: 72px;
+      padding: 4px 8px;
+      border: 1px solid #343434;
+      border-radius: 4px;
+      background: #101010;
+      color: var(--blue);
+      font-family: Consolas, monospace;
+      font-size: 13px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .prompt-cell { align-items: stretch; }
+
+    .task-prompt {
+      min-height: 210px;
+      max-height: 260px;
+      font-size: 12px;
+      line-height: 1.45;
+      resize: vertical;
+    }
+
+    .preview-stack {
+      display: grid;
+      justify-items: center;
+      gap: 8px;
+      width: 100%;
+      min-width: 0;
+    }
+
+    .preview-box {
+      display: grid;
+      place-items: center;
+      width: 260px;
+      height: 260px;
+      border-radius: 5px;
+      background: var(--panel-soft);
+      overflow: hidden;
+    }
+
+    .preview-box img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      display: block;
+    }
+
+    .empty-preview { color: var(--muted); font-size: 12px; }
+
+    .preview-name {
+      width: 320px;
+      max-width: 100%;
+      color: #c9d2dc;
+      font-size: 12px;
+      line-height: 1.35;
+      text-align: center;
+      word-break: break-all;
+    }
+    .preview-box.downloadable { cursor: pointer; border: 1px solid rgba(255, 122, 61, 0.55); }
+    .preview-box.downloadable:hover { border-color: var(--orange); }
+
+    .stack { display: grid; gap: 7px; color: var(--text); font-size: 13px; line-height: 1.3; }
+    .success { color: var(--green); }
+    .failed { color: var(--red); }
+    .muted { color: var(--muted); }
+
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: fit-content;
+      min-width: 48px;
+      height: 22px;
+      padding: 0 8px;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.08);
+      color: #e5e5e5;
+      font-size: 12px;
+    }
+
+    .status-pill.running { background: rgba(158, 212, 255, 0.14); color: var(--blue); }
+    .status-pill.done { background: rgba(0, 184, 107, 0.15); color: var(--green); }
+    .status-pill.error { background: rgba(255, 98, 93, 0.14); color: var(--red); }
+
+    .ops { display: grid; gap: 9px; align-content: center; }
+
+    .error-detail {
+      max-width: 100%;
+      color: var(--red);
+      font-size: 12px;
+    }
+
+    .error-detail summary {
+      cursor: pointer;
+      color: var(--orange);
+    }
+
+    .error-detail pre {
+      max-width: 260px;
+      max-height: 120px;
+      overflow: auto;
+      margin: 6px 0 0;
+      padding: 8px;
+      border: 1px solid rgba(255, 98, 93, 0.35);
+      border-radius: 4px;
+      background: #0d0d0d;
+      color: #ffd0cc;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .task-log {
+      width: min(100%, 680px);
+      margin-top: 4px;
+      border: 1px solid #303030;
+      border-radius: 4px;
+      background: #101010;
+      overflow: hidden;
+    }
+
+    .task-log-title {
+      padding: 5px 8px;
+      border-bottom: 1px solid #2a2a2a;
+      color: #eaf3ff;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .task-log pre {
+      max-height: 106px;
+      overflow: auto;
+      margin: 0;
+      padding: 7px 8px;
+      color: #aeb8c4;
+      font-family: Consolas, monospace;
+      font-size: 12px;
+      line-height: 1.45;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .pager {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 8px;
+      margin: 12px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .pager button {
+      height: 28px;
+      padding: 0 10px;
+      font-size: 12px;
+    }
+
+    .pager-info {
+      min-width: 220px;
+      color: var(--blue);
+      text-align: center;
+    }
+
+    #files, #jsonFile, #configFile { display: none; }
+
+    @media (max-width: 900px) {
+      .app { padding: 14px; }
+      .head { align-items: flex-start; flex-direction: column; }
+      .actions { justify-content: flex-start; }
+      .table { overflow-x: auto; }
+    }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <header class="head">
+      <div class="title-zone">
+        <h1>印花图提取</h1>
+        <div class="config-line">
+          <button id="pickConfig">配置文件</button>
+          <span id="configStatus" class="config-status">配置读取中</span>
+        </div>
+      </div>
+      <div class="actions">
+        <button id="pickFiles" class="primary">上传图片</button>
+        <button id="pickJson">导入JSON</button>
+        <button id="chooseFolder">下载文件夹</button>
+        <span id="folderName" class="folder-name">未选择</span>
+        <button id="downloadPage">下载本页</button>
+        <button id="translateEnglish">一键翻译英文</button>
+        <span id="translateStatus" class="merge-status"></span>
+        <button id="mergePage">合并本页</button>
+        <span id="mergeStatus" class="merge-status"></span>
+        <button id="start">批量生成</button>
+        <button id="stop">停止</button>
+        <button id="clear">清空</button>
+      </div>
+    </header>
+
+    <section class="prompt-wrap">
+      <div class="prompt-head">
+        <div class="prompt-label">提示词</div>
+        <div class="prompt-tools">
+          <label class="option-group">相似度 <input id="similarity" class="range-control" type="range" min="5" max="100" value="50"><span id="similarityValue">50%</span></label>
+          <div class="option-group">比例 <div class="ratio-buttons"><button class="ratio-button active" type="button" data-ratio="1:1">1:1</button><button class="ratio-button" type="button" data-ratio="9:16">9:16</button><button class="ratio-button" type="button" data-ratio="4:3">4:3</button></div></div>
+          <button id="fillBlankPrompts">覆盖全部提示词</button>
+        </div>
+      </div>
+      <textarea id="prompt">Extract the print/pattern from the input image and create a clean commercially usable derivative design.
+Keep the core motif, silhouette, rhythm, and decorative identity, but redraw it as an original high-resolution print asset.
+Remove product mockup, folds, shadows, background, watermark, logo, text, hands, mannequin, and unrelated objects.
+Use crisp edges, balanced spacing, rich but controlled color, and a plain transparent or white background when possible.
+Make it suitable for apparel, sticker, textile, or product-surface printing. Do not copy protected characters or brand marks.</textarea>
+    </section>
+
+    <input id="files" type="file" accept="image/png,image/jpeg,image/webp" multiple>
+    <input id="jsonFile" type="file" accept="application/json,.json">
+    <input id="configFile" type="file" accept="application/json,.json">
+
+    <div class="progress-row">
+      <div class="progress"><div id="bar" class="bar"></div></div>
+      <div id="progressText" class="progress-text">0 / 0</div>
+    </div>
+
+    <section class="table">
+      <div class="thead">
+        <div class="th">编号</div>
+        <div class="th">预览图</div>
+        <div class="th">生成图预览</div>
+        <div class="th">任务数量</div>
+        <div class="th">提示词</div>
+        <div class="th">信息</div>
+        <div class="th">操作</div>
+      </div>
+      <div id="rows"></div>
+    </section>
+
+    <div class="pager">
+      <button id="firstPage">首页</button>
+      <button id="prevPage">上一页</button>
+      <span id="pageInfo" class="pager-info">第 1 / 1 页，50/page</span>
+      <button id="nextPage">下一页</button>
+      <button id="lastPage">尾页</button>
+    </div>
+  </main>
+
+  <script>
+    const API_ENDPOINT = "http://127.0.0.1:8787/v1/images/edits";
+    const IMAGE_PROXY = "http://127.0.0.1:8787/proxy-image?url=";
+    const CACHE_ORIGIN = "http://127.0.0.1:8787";
+    const CONFIG_ENDPOINT = "http://127.0.0.1:8787/config";
+    const TRANSLATE_ENDPOINT = "http://127.0.0.1:8787/translate-listing";
+    const DEFAULT_CONFIG = { baseUrl: "https://beecode.cc", model: "gpt-image-2", size: "1024x1024", concurrency: 3 };
+    let runtimeConfig = { ...DEFAULT_CONFIG };
+    const PAGE_SIZE = 50;
+    const RETRY_DELAY_MS = 3000;
+    const MAX_TIMEOUT_RETRIES = 1;
+    const JSON_IMPORT_CONCURRENCY = 10;
+    const JSON_IMPORT_MAX_RETRIES = 1;
+    const TRANSLATE_CONCURRENCY = 3;
+
+    const state = { items: [], cursor: 0, running: 0, stopped: false, downloadDir: null, page: 1, pageSize: PAGE_SIZE, retryQueue: [], retryTimer: null, jsonCacheQueue: [], jsonCacheRunning: 0 };
+    const logCacheTimers = new Map();
+    const promptCacheTimers = new Map();
+    const el = Object.fromEntries(Array.from(document.querySelectorAll("[id]")).map((node) => [node.id, node]));
+
+    function remoteEndpoint() {
+      return `${runtimeConfig.baseUrl.replace(/\/$/, "")}/v1/images/edits`;
+    }
+
+    function applyConfigSummary(config) {
+      runtimeConfig = {
+        baseUrl: (config.baseUrl || DEFAULT_CONFIG.baseUrl).replace(/\/$/, ""),
+        model: config.model || DEFAULT_CONFIG.model,
+        size: config.size || DEFAULT_CONFIG.size,
+        concurrency: Math.max(1, Number(config.concurrency || DEFAULT_CONFIG.concurrency))
+      };
+      const keyText = config.hasKey ? `key ${config.key || "已读取"}` : "未配置 key";
+      el.configStatus.textContent = `${keyText} | ${runtimeConfig.model} | ${runtimeConfig.size} | ${runtimeConfig.concurrency} 并发`;
+      el.configStatus.title = `配置源：${config.configPath || config.keySource || "none"}`;
+    }
+
+    async function loadConfig() {
+      try {
+        const response = await fetch(CONFIG_ENDPOINT);
+        const text = await response.text();
+        if (!response.ok) throw new Error(text.slice(0, 300));
+        applyConfigSummary(JSON.parse(text));
+      } catch (error) {
+        el.configStatus.textContent = `配置读取失败：${error.message}`;
+      }
+    }
+
+    async function importConfigFile(file) {
+      const raw = await file.text();
+      let parsed;
+      try { parsed = JSON.parse(raw); }
+      catch { throw new Error("配置文件不是合法 JSON"); }
+      const response = await fetch(CONFIG_ENDPOINT, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(parsed)
+      });
+      const text = await response.text();
+      if (!response.ok) throw new Error(text.slice(0, 300));
+      applyConfigSummary(JSON.parse(text));
+      notice("配置文件已写入 beecode.config.local.json");
+    }
+
+    function cacheUrl(value) {
+      if (!value) return "";
+      return value.startsWith("http") || value.startsWith("blob:") ? value : `${CACHE_ORIGIN}${value}`;
+    }
+
+    function revokeIfBlob(url) {
+      if (url && url.startsWith("blob:")) URL.revokeObjectURL(url);
+    }
+
+    function fileLabel(item) {
+      return item.fileName || (item.file && item.file.name) || "image";
+    }
+
+    function listingLabel(item) {
+      return String(item && item.listing ? item.listing : "").trim();
+    }
+
+    function previewLabel(item) {
+      return listingLabel(item) || fileLabel(item);
+    }
+
+    function downloadBaseName(item) {
+      const title = listingLabel(item) || fileLabel(item).replace(/\.[^.]+$/, "");
+      return cleanFileName(title, "image");
+    }
+
+    function codeSuffix(value) {
+      const text = String(value || "").trim();
+      if (!text) return "";
+      const parts = text.split(/[_-]/).filter(Boolean);
+      return parts.length ? parts[parts.length - 1] : text;
+    }
+
+    function itemDisplayCode(item) {
+      if (item.displayCode) return item.displayCode;
+      if (item.sourceCode) return codeSuffix(item.sourceCode);
+      const base = fileLabel(item).replace(/\.[^.]+$/, "");
+      return /^\d{8,}[_-].+/.test(base) ? codeSuffix(base) : "";
+    }
+
+    function applyCachedTask(item, cached) {
+      item.id = cached.id;
+      item.fileName = cached.fileName || item.fileName;
+      item.sourceCode = cached.sourceCode || item.sourceCode || "";
+      item.displayCode = cached.displayCode || item.displayCode || itemDisplayCode(item);
+      item.listing = typeof cached.listing === "string" ? cached.listing : (typeof item.listing === "string" ? item.listing : "");
+      item.createdAt = cached.createdAt || item.createdAt || nowText();
+      item.status = cached.status || item.status;
+      item.message = cached.message || item.message;
+      item.errorLog = cached.errorLog || "";
+      item.logs = Array.isArray(cached.logs) ? cached.logs : (item.logs || []);
+      item.prompt = typeof cached.prompt === "string" ? cached.prompt : (typeof item.prompt === "string" ? item.prompt : "");
+      item.inputType = cached.inputType || item.inputType;
+      item.outputType = cached.outputType || item.outputType;
+      item.inputUrl = cacheUrl(cached.inputUrl) || item.inputUrl;
+      item.outputUrl = cacheUrl(cached.outputUrl) || item.outputUrl || "";
+      item.retryCount = Number(cached.retryCount || item.retryCount || 0);
+      item.retryAt = Number(cached.retryAt || item.retryAt || 0);
+      item.cached = true;
+      return item;
+    }
+
+    function pad(value) { return String(value).padStart(2, "0"); }
+
+    function nowText() {
+      const d = new Date();
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    }
+
+    function shortName(name, max = 58) {
+      return name.length > max ? `${name.slice(0, max)}...` : name;
+    }
+
+    function cleanFileName(value, fallback = "image") {
+      const name = String(value || fallback).replace(/[\\/:*?"<>|]/g, "_").trim() || fallback;
+      return name.slice(0, 150);
+    }
+
+    function extensionFromUrl(url) {
+      try {
+        const ext = new URL(url).pathname.match(/\.(png|jpe?g|webp)(?:$|[?#])/i);
+        return ext ? ext[1].toLowerCase().replace("jpeg", "jpg") : "jpg";
+      } catch {
+        return "jpg";
+      }
+    }
+    function formatBytes(bytes) {
+      if (!Number.isFinite(bytes)) return "0 B";
+      if (bytes < 1024) return `${bytes} B`;
+      if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+      return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
+    }
+
+    function delay(ms) {
+      return new Promise((resolve) => setTimeout(resolve, ms));
+    }
+
+    async function fileToBase64Info(file) {
+      const dataUrl = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ""));
+        reader.onerror = () => reject(reader.error || new Error("读取 Base64 失败"));
+        reader.readAsDataURL(file);
+      });
+      const comma = dataUrl.indexOf(",");
+      const base64 = comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
+      return { mime: file.type || "image/png", bytes: file.size || 0, chars: base64.length };
+    }
+
+    function taskLog(item, message, options = {}) {
+      if (!item) return;
+      item.logs = Array.isArray(item.logs) ? item.logs : [];
+      item.logs.unshift(`[${new Date().toLocaleTimeString()}] ${message}`);
+      item.logs = item.logs.slice(0, 80);
+      if (options.renderNow !== false && isCurrentPageItem(item)) render();
+      if (item.cached || !item.file) scheduleLogCache(item);
+    }
+
+    function scheduleLogCache(item) {
+      clearTimeout(logCacheTimers.get(item.id));
+      logCacheTimers.set(item.id, setTimeout(() => {
+        logCacheTimers.delete(item.id);
+        cacheStatus(item).catch((error) => notice(`缓存任务日志失败：${error.message}`));
+      }, 350));
+    }
+
+    function schedulePromptCache(item) {
+      clearTimeout(promptCacheTimers.get(item.id));
+      promptCacheTimers.set(item.id, setTimeout(() => {
+        promptCacheTimers.delete(item.id);
+        cacheStatus(item).catch((error) => notice(`缓存任务提示词失败：${error.message}`));
+      }, 500));
+    }
+
+    function notice(message) {
+      console.log(`[${new Date().toLocaleTimeString()}] ${message}`);
+    }
+
+    function logText(item) {
+      return Array.isArray(item.logs) && item.logs.length ? item.logs.join("\n") : "暂无日志";
+    }
+
+    function escapeHtml(value) {
+      return String(value).replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
+    }
+
+    function statusText(status) {
+      return { queued: "待生成", retry: "等待重试", running: "处理中", done: "已完成", error: "失败" }[status] || status;
+    }
+
+    function successCount(item) { return item.status === "done" ? 1 : 0; }
+
+    function isRetryableError(error) {
+      const message = error && error.message ? error.message : String(error || "");
+      return /HTTP\s+(502|503|504)\b/i.test(message) || /gateway timeout|timeout|timed out/i.test(message);
+    }
+
+    function removeRetryQueue(item) {
+      if (!item) return;
+      state.retryQueue = state.retryQueue.filter((id) => id !== item.id);
+    }
+
+    function clearRetryTimer() {
+      if (state.retryTimer) clearTimeout(state.retryTimer);
+      state.retryTimer = null;
+    }
+
+    function scheduleRetryPump() {
+      clearRetryTimer();
+      if (state.stopped) return;
+      const now = Date.now();
+      let nextAt = Infinity;
+      state.retryQueue = state.retryQueue.filter((id) => {
+        const item = state.items.find((entry) => entry.id === id);
+        if (!item || item.status !== "retry") return false;
+        nextAt = Math.min(nextAt, Number(item.retryAt || now));
+        return true;
+      });
+      if (!Number.isFinite(nextAt)) return;
+      state.retryTimer = setTimeout(() => {
+        state.retryTimer = null;
+        pump();
+      }, Math.max(0, nextAt - now));
+    }
+
+    function enqueueRetry(item, error) {
+      const nextCount = Number(item.retryCount || 0) + 1;
+      if (nextCount > MAX_TIMEOUT_RETRIES || state.stopped) return false;
+      item.retryCount = nextCount;
+      item.retryAt = Date.now() + RETRY_DELAY_MS;
+      item.status = "retry";
+      item.message = `等待 3s 后自动重试 (${nextCount}/${MAX_TIMEOUT_RETRIES})`;
+      item.errorLog = buildErrorLog(item, error);
+      if (!state.retryQueue.includes(item.id)) state.retryQueue.push(item.id);
+      state.retryQueue.sort((a, b) => {
+        const left = state.items.find((entry) => entry.id === a);
+        const right = state.items.find((entry) => entry.id === b);
+        return Number((left && left.retryAt) || 0) - Number((right && right.retryAt) || 0);
+      });
+      taskLog(item, `进入超时重试队列：3s 后重试 (${nextCount}/${MAX_TIMEOUT_RETRIES})`);
+      cacheStatus(item).catch((cacheError) => taskLog(item, `缓存重试状态失败：${cacheError.message}`));
+      scheduleRetryPump();
+      return true;
+    }
+
+    function totalPages() {
+      return Math.max(1, Math.ceil(state.items.length / state.pageSize));
+    }
+
+    function clampPage() {
+      state.page = Math.min(Math.max(1, state.page), totalPages());
+    }
+
+    function pageRange() {
+      clampPage();
+      const start = (state.page - 1) * state.pageSize;
+      return { start, end: Math.min(start + state.pageSize, state.items.length) };
+    }
+
+    function isCurrentPageItem(item) {
+      const index = state.items.indexOf(item);
+      if (index < 0) return false;
+      const { start, end } = pageRange();
+      return index >= start && index < end;
+    }
+
+    function addFiles(files) {
+      const images = Array.from(files).filter((file) => /^image\/(png|jpe?g|webp)$/i.test(file.type));
+      if (!images.length) return;
+      for (const file of images) {
+        const item = {
+          id: crypto.randomUUID(),
+          file,
+          fileName: file.name,
+          inputType: file.type,
+          inputUrl: URL.createObjectURL(file),
+          outputUrl: "",
+          outputBlob: null,
+          sourceCode: "",
+          displayCode: "",
+          status: "queued",
+          createdAt: nowText(),
+          message: "等待生成",
+          prompt: "",
+          errorLog: "",
+          retryCount: 0,
+          retryAt: 0,
+          logs: []
+        };
+        state.items.push(item);
+        taskLog(item, "新建任务", { renderNow: false });
+        cacheInput(item).catch((error) => taskLog(item, `缓存失败：${error.message}`));
+      }
+      el.files.value = "";
+      render();
+    }
+
+    function pickJsonRows(payload) {
+      if (Array.isArray(payload)) return payload;
+      if (Array.isArray(payload && payload.data)) return payload.data;
+      if (Array.isArray(payload && payload.items)) return payload.items;
+      if (Array.isArray(payload && payload.list)) return payload.list;
+      return [];
+    }
+
+    function pickJsonImageUrl(entry) {
+      return entry && (entry.imageurl || entry.imageUrl || entry.image_url || entry.url || entry.src || entry.image);
+    }
+
+    async function addJsonFile(file) {
+      let payload;
+      try { payload = JSON.parse(await file.text()); }
+      catch (error) { alert(`JSON 解析失败：${error.message}`); return; }
+      const rows = pickJsonRows(payload).filter((entry) => pickJsonImageUrl(entry));
+      if (!rows.length) return alert("JSON 里没有找到 imageurl 字段。");
+      for (const entry of rows) {
+        const imageUrl = String(pickJsonImageUrl(entry)).trim();
+        const code = entry["编号"] || entry.code || entry.id || entry.sku || crypto.randomUUID();
+        const sourceCode = String(code);
+        const displayCode = codeSuffix(sourceCode);
+        const listing = entry.listing || entry.title || "";
+        const ext = extensionFromUrl(imageUrl);
+        const item = {
+          id: crypto.randomUUID(),
+          file: null,
+          fileName: `${cleanFileName(sourceCode, "json-image")}.${ext}`,
+          sourceCode,
+          displayCode,
+          listing: String(listing || ""),
+          inputType: ext === "png" ? "image/png" : ext === "webp" ? "image/webp" : "image/jpeg",
+          inputUrl: "",
+          sourceUrl: imageUrl,
+          outputUrl: "",
+          outputBlob: null,
+          status: "queued",
+          createdAt: nowText(),
+          message: "等待缓存原图",
+          prompt: "",
+          errorLog: "",
+          retryCount: 0,
+          retryAt: 0,
+          logs: []
+        };
+        state.items.push(item);
+        taskLog(item, `JSON导入：${shortName(String(code), 48)}`, { renderNow: false });
+        if (listing) taskLog(item, `listing：${shortName(String(listing), 90)}`, { renderNow: false });
+        enqueueJsonCache(item);
+      }
+      el.jsonFile.value = "";
+      render();
+    }
+
+    function enqueueJsonCache(item) {
+      if (!item || !item.sourceUrl || item.inputUrl) return;
+      if (!state.jsonCacheQueue.includes(item.id)) state.jsonCacheQueue.push(item.id);
+      item.message = "等待缓存原图";
+      taskLog(item, `进入JSON原图缓存队列：${JSON_IMPORT_CONCURRENCY} 并发`, { renderNow: false });
+      pumpJsonCacheQueue();
+    }
+
+    function pumpJsonCacheQueue() {
+      while (state.jsonCacheRunning < JSON_IMPORT_CONCURRENCY && state.jsonCacheQueue.length) {
+        const id = state.jsonCacheQueue.shift();
+        const item = state.items.find((entry) => entry.id === id);
+        if (!item || item.inputUrl) continue;
+        state.jsonCacheRunning += 1;
+        cacheRemoteInputWithRetry(item)
+          .catch((error) => {
+            item.message = "缓存JSON原图失败";
+            item.errorLog = buildErrorLog(item, error);
+            taskLog(item, `缓存JSON原图失败：${item.errorLog.replace(/\n/g, " | ")}`);
+            cacheStatus(item).catch((cacheError) => taskLog(item, `缓存JSON失败状态失败：${cacheError.message}`));
+          })
+          .finally(() => {
+            state.jsonCacheRunning -= 1;
+            render();
+            pumpJsonCacheQueue();
+            if (!state.stopped) pump();
+          });
+      }
+    }
+
+    async function cacheRemoteInputWithRetry(item) {
+      for (let attempt = 0; attempt <= JSON_IMPORT_MAX_RETRIES; attempt += 1) {
+        try {
+          if (attempt > 0) taskLog(item, `缓存JSON原图重试：第 ${attempt} 次`);
+          await cacheRemoteInput(item);
+          return;
+        } catch (error) {
+          if (attempt < JSON_IMPORT_MAX_RETRIES && isRetryableError(error)) {
+            taskLog(item, `缓存JSON原图临时失败：${error.message}，3s 后重试`);
+            await delay(RETRY_DELAY_MS);
+            continue;
+          }
+          throw error;
+        }
+      }
+    }
+
+    function refetchJsonInput(item) {
+      if (!item || !item.sourceUrl) return;
+      if (item.inputUrl) revokeIfBlob(item.inputUrl);
+      item.file = null;
+      item.inputUrl = "";
+      item.errorLog = "";
+      item.message = "重新获取原图";
+      if (item.status === "error") item.status = "queued";
+      state.jsonCacheQueue = state.jsonCacheQueue.filter((id) => id !== item.id);
+      taskLog(item, "手动重新获取JSON原图");
+      enqueueJsonCache(item);
+      render();
+    }
+    async function cacheRemoteInput(item) {
+      const remoteUrl = item.inputUrl || `${IMAGE_PROXY}${encodeURIComponent(item.sourceUrl)}`;
+      item.message = "缓存JSON原图";
+      render();
+      taskLog(item, "下载JSON原图：开始");
+      const response = await fetch(remoteUrl, { cache: "no-store" });
+      taskLog(item, `下载JSON原图返回：HTTP ${response.status}`);
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => "");
+        throw new Error(`HTTP ${response.status}: ${errorText.slice(0, 500)}`);
+      }
+      const blob = await response.blob();
+      if (!blob.type || !blob.type.startsWith("image/")) throw new Error(`远程返回不是图片：${blob.type || "unknown"}`);
+      const file = new File([blob], item.fileName, { type: blob.type || item.inputType || "image/jpeg" });
+      item.file = file;
+      item.inputType = file.type;
+      item.inputUrl = URL.createObjectURL(blob);
+      item.message = "等待生成";
+      taskLog(item, `下载JSON原图完成：${formatBytes(blob.size)}`);
+      await cacheInput(item);
+      item.file = null;
+    }
+
+    async function cacheInput(item) {
+      if (!item.file) return;
+      const form = new FormData();
+      form.set("id", item.id);
+      form.set("createdAt", item.createdAt);
+      form.set("status", item.status);
+      form.set("message", item.message);
+      form.set("prompt", item.prompt || "");
+      form.set("sourceCode", item.sourceCode || "");
+      form.set("displayCode", item.displayCode || itemDisplayCode(item) || "");
+      form.set("listing", listingLabel(item));
+      form.set("errorLog", item.errorLog || "");
+      form.set("retryCount", String(item.retryCount || 0));
+      form.set("retryAt", String(item.retryAt || 0));
+      form.set("logs", JSON.stringify(item.logs || []));
+      form.set("image", item.file, item.fileName || item.file.name);
+      const response = await fetch(`${CACHE_ORIGIN}/cache/input`, { method: "POST", body: form });
+      const text = await response.text();
+      if (!response.ok) throw new Error(text.slice(0, 300));
+      const cached = JSON.parse(text);
+      const oldInputUrl = item.inputUrl;
+      const keep = { status: item.status, message: item.message, prompt: item.prompt, sourceCode: item.sourceCode, displayCode: item.displayCode, listing: item.listing, errorLog: item.errorLog, logs: item.logs, outputUrl: item.outputUrl, outputType: item.outputType };
+      applyCachedTask(item, cached);
+      item.status = keep.status;
+      item.message = keep.message;
+      item.prompt = keep.prompt;
+      item.sourceCode = keep.sourceCode;
+      item.displayCode = keep.displayCode;
+      item.listing = keep.listing || "";
+      item.errorLog = keep.errorLog;
+      item.logs = keep.logs;
+      item.outputUrl = keep.outputUrl;
+      item.outputType = keep.outputType;
+      revokeIfBlob(oldInputUrl);
+      taskLog(item, "已缓存原图");
+      render();
+    }
+
+    async function cacheStatus(item, outputBlob) {
+      const form = new FormData();
+      form.set("id", item.id);
+      form.set("status", item.status);
+      form.set("message", item.message || "");
+      form.set("prompt", item.prompt || "");
+      form.set("sourceCode", item.sourceCode || "");
+      form.set("displayCode", item.displayCode || itemDisplayCode(item) || "");
+      form.set("listing", listingLabel(item));
+      form.set("errorLog", item.errorLog || "");
+      form.set("retryCount", String(item.retryCount || 0));
+      form.set("retryAt", String(item.retryAt || 0));
+      form.set("logs", JSON.stringify(item.logs || []));
+      if (outputBlob) form.set("output", outputBlob, `${fileLabel(item).replace(/\.[^.]+$/, "")}.png`);
+      const response = await fetch(`${CACHE_ORIGIN}/cache/output`, { method: "POST", body: form });
+      const text = await response.text();
+      if (!response.ok) throw new Error(text.slice(0, 300));
+      const cached = JSON.parse(text);
+      if (!(item.status === "running" && !outputBlob)) applyCachedTask(item, cached);
+    }
+
+    async function loadCachedTasks() {
+      const response = await fetch(`${CACHE_ORIGIN}/cache/tasks`);
+      const text = await response.text();
+      if (!response.ok) throw new Error(text.slice(0, 300));
+      const tasks = JSON.parse(text);
+      state.items = tasks.map((task) => applyCachedTask({ file: null, outputBlob: null }, task));
+      render();
+
+    }
+
+    async function getRunFile(item) {
+      if (item.file) return item.file;
+      if (!item.inputUrl) throw new Error("缓存原图不存在");
+      const response = await fetch(item.inputUrl);
+      if (!response.ok) throw new Error(`读取缓存原图失败：HTTP ${response.status}`);
+      const blob = await response.blob();
+      const name = fileLabel(item);
+      return new File([blob], name, { type: blob.type || item.inputType || "image/png" });
+    }
+    function render() {
+      const finished = state.items.filter((item) => item.status === "done" || item.status === "error").length;
+      el.bar.style.width = state.items.length ? `${Math.round((finished / state.items.length) * 100)}%` : "0%";
+      el.progressText.textContent = `${finished} / ${state.items.length}`;
+      const pages = totalPages();
+      const { start, end } = pageRange();
+      el.pageInfo.textContent = state.items.length ? `第 ${state.page} / ${pages} 页，显示 ${start + 1}-${end} / ${state.items.length}，50/page` : "第 1 / 1 页，0 条，50/page";
+      el.firstPage.disabled = state.page <= 1;
+      el.prevPage.disabled = state.page <= 1;
+      el.nextPage.disabled = state.page >= pages;
+      el.lastPage.disabled = state.page >= pages;
+      el.rows.innerHTML = "";
+
+      for (const item of state.items.slice(start, end)) {
+        const row = document.createElement("div");
+        row.className = "task-row";
+        const statusClass = item.status === "running" ? "running" : item.status === "done" ? "done" : item.status === "error" ? "error" : item.status === "retry" ? "running" : "";
+        const hasInputReady = Boolean(item.file || item.inputUrl);
+        const canGenerate = item.status !== "running" && hasInputReady;
+        const runText = item.status === "done" ? "重新生成" : item.status === "error" ? "重发" : item.status === "retry" ? "立即重试" : "生成";
+        const itemPrompt = item.prompt || "";
+        const codeText = escapeHtml(itemDisplayCode(item));
+        const codeTitle = escapeHtml(item.sourceCode || itemDisplayCode(item) || "");
+        const inputName = escapeHtml(previewLabel(item));
+        const outputName = escapeHtml(listingLabel(item) || `${downloadBaseName(item)}.png`);
+        row.innerHTML = `
+          <div class="td"><span class="code-badge" title="${codeTitle}">${codeText || "--"}</span></div>
+          <div class="td"><div class="preview-stack"><div class="preview-box">${item.inputUrl ? `<img src="${item.inputUrl}" alt="input">` : `<span class="empty-preview">等待缓存原图</span>`}</div><div class="preview-name" title="${inputName}">${inputName}</div></div></div>
+          <div class="td"><div class="preview-stack"><div class="preview-box ${item.outputUrl ? "downloadable" : ""}" ${item.outputUrl ? `data-download="${item.id}" title="点击下载生成图"` : ""}>${item.outputUrl ? `<img src="${item.outputUrl}" alt="output">` : `<span class="empty-preview">生成后显示</span>`}</div><div class="preview-name" title="${outputName}">${outputName}</div></div></div>
+          <div class="td"><div class="stack"><div>总数：1</div><div class="${item.status === "done" ? "success" : item.status === "error" ? "failed" : ""}">${item.status === "error" ? "失败：1" : `成功：${successCount(item)}`}</div></div></div>
+          <div class="td prompt-cell"><textarea class="task-prompt" data-prompt="${item.id}">${escapeHtml(itemPrompt)}</textarea></div>
+          <div class="td"><div class="stack"><div>创建时间：${escapeHtml(item.createdAt)}</div><div>状态： <span class="status-pill ${statusClass}">${statusText(item.status)}</span></div><div class="muted">${escapeHtml(item.message)}</div>${item.errorLog ? `<details class="error-detail" open><summary>失败日志</summary><pre>${escapeHtml(item.errorLog)}</pre></details>` : ""}<div class="task-log"><div class="task-log-title">任务日志</div><pre>${escapeHtml(logText(item))}</pre></div></div></div>
+          <div class="td"><div class="ops">${item.sourceUrl ? `<button class="text-action" data-refetch="${item.id}">重新获取</button>` : ""}${canGenerate ? `<button class="text-action" data-run="${item.id}">${runText}</button>` : ""}${item.outputUrl ? `<button class="text-action" data-download="${item.id}">下载</button>` : ""}${item.errorLog ? `<button class="text-action" data-copy-error="${item.id}">复制日志</button>` : ""}<button class="text-action" data-delete="${item.id}">删除</button></div></div>
+        `;
+        el.rows.appendChild(row);
+      }
+    }
+
+    function nextQueuedItem() {
+      const now = Date.now();
+      for (let index = 0; index < state.retryQueue.length; index += 1) {
+        const item = state.items.find((entry) => entry.id === state.retryQueue[index]);
+        if (!item || item.status !== "retry") {
+          state.retryQueue.splice(index, 1);
+          index -= 1;
+          continue;
+        }
+        if (Number(item.retryAt || 0) <= now) {
+          state.retryQueue.splice(index, 1);
+          return item;
+        }
+      }
+      scheduleRetryPump();
+      while (state.cursor < state.items.length) {
+        const item = state.items[state.cursor++];
+        if (item.status === "queued" && (item.file || item.inputUrl)) return item;
+      }
+      return null;
+    }
+
+    function startQueue() {
+      if (!state.items.length) return alert("请先新建任务并选择图片。");
+      state.stopped = false;
+      state.cursor = 0;
+      state.retryQueue = [];
+      clearRetryTimer();
+      for (const item of state.items) {
+        if (item.status !== "done" && item.status !== "running") {
+          item.status = "queued";
+          item.message = (item.sourceUrl && !item.inputUrl && !item.file) ? "等待缓存原图" : "等待生成";
+          item.errorLog = "";
+          if (item.sourceUrl && !item.inputUrl && !item.file) enqueueJsonCache(item);
+          item.retryCount = 0;
+          item.retryAt = 0;
+        }
+      }
+      const pending = state.items.filter((item) => item.status === "queued").length;
+      for (const item of state.items.filter((entry) => entry.status === "queued")) taskLog(item, `批量生成启动，${runtimeConfig.concurrency} 并发`, { renderNow: false });
+      render();
+      pump();
+    }
+
+    function pump() {
+      while (!state.stopped && state.running < runtimeConfig.concurrency) {
+        const item = nextQueuedItem();
+        if (!item) return;
+        state.running += 1;
+        runItem(item)
+          .catch((error) => { failItem(item, error); })
+          .finally(() => {
+            state.running -= 1;
+            render();
+            pump();
+          });
+      }
+    }
+
+    function selectedRatio() {
+      const active = document.querySelector(".ratio-button.active");
+      return active ? active.dataset.ratio : "1:1";
+    }
+
+    function selectedSimilarity() {
+      const value = Number(el.similarity ? el.similarity.value : 50);
+      return Math.min(100, Math.max(5, Number.isFinite(value) ? value : 50));
+    }
+
+    function promptOptionsText() {
+      return `相似度要求：与输入图保持约 ${selectedSimilarity()}% 相似度。\n输出比例：${selectedRatio()}。`;
+    }
+
+    function currentPromptForItem(item) {
+      const box = document.querySelector(`[data-prompt="${item.id}"]`);
+      return (box ? box.value : (item.prompt || "")).trim();
+    }
+
+    function buildEffectivePrompt(basePrompt) {
+      return `${String(basePrompt || "").trim()}\n\n${promptOptionsText()}`.trim();
+    }
+    async function runItem(item) {
+      if (item.status === "running") return;
+      const wasError = item.status === "error";
+      const wasDone = item.status === "done";
+      const wasRetry = item.status === "retry";
+      removeRetryQueue(item);
+      item.retryAt = 0;
+      item.status = "running";
+      item.message = wasDone ? "重新生成" : "准备请求";
+      item.prompt = currentPromptForItem(item);
+      if (!item.prompt) throw new Error("提示词为空：请填写该行提示词，或点击填充空白提示词。");
+      item.errorLog = "";
+      render();
+      if (wasDone) taskLog(item, "根据当前提示词重新生成");
+      if (wasRetry) taskLog(item, "超时队列重试：重新请求");
+      if (wasError) taskLog(item, "失败重发：重新请求");
+      taskLog(item, "准备：读取原图文件");
+      await cacheStatus(item).catch((error) => taskLog(item, `缓存状态失败：${error.message}`));
+
+      const runFile = await getRunFile(item);
+      taskLog(item, `读取原图：${shortName(fileLabel(item), 42)} / ${formatBytes(runFile.size || 0)}`);
+
+      item.message = "转换 Base64";
+      render();
+      taskLog(item, "转换 Base64：开始");
+      const inputBase64 = await fileToBase64Info(runFile);
+      taskLog(item, `转换 Base64：完成 ${inputBase64.mime} / ${formatBytes(inputBase64.bytes)} / ${inputBase64.chars} chars`);
+
+      const prompt = buildEffectivePrompt(item.prompt);
+      taskLog(item, `提示词配置：相似度 ${selectedSimilarity()}% / 比例 ${selectedRatio()}`);
+      const form = new FormData();
+      form.set("model", runtimeConfig.model);
+      form.set("prompt", prompt);
+      form.set("size", runtimeConfig.size);
+      form.set("n", "1");
+      form.set("image", runFile, fileLabel(item));
+      taskLog(item, `组装 request：model=${runtimeConfig.model} size=${runtimeConfig.size} prompt=${prompt.length} chars image=multipart`);
+
+      item.message = "请求 BeeCode";
+      render();
+      taskLog(item, `request 发送：POST ${remoteEndpoint()}`);
+      taskLog(item, "等待 BeeCode 返回...");
+      const response = await fetch(API_ENDPOINT, {
+        method: "POST",
+        body: form
+      });
+      taskLog(item, `接收返回：HTTP ${response.status}`);
+
+      const text = await response.text();
+      taskLog(item, `读取 response body：${formatBytes(text.length)}`);
+      if (!response.ok) throw new Error(`HTTP ${response.status}: ${text.slice(0, 300)}`);
+
+      let payload;
+      try { payload = JSON.parse(text); }
+      catch { throw new Error(`接口返回不是 JSON：${text.slice(0, 300)}`); }
+      taskLog(item, "解析 JSON：成功");
+
+      const first = payload.data && payload.data[0];
+      let blob;
+      if (first && first.b64_json) {
+        taskLog(item, `接收 Base64 返回：b64_json ${first.b64_json.length} chars`);
+        taskLog(item, "Base64 转图片 Blob：开始");
+        blob = base64ToBlob(first.b64_json, "image/png");
+        taskLog(item, `Base64 转图片 Blob：完成 ${formatBytes(blob.size)}`);
+      } else if (first && first.url) {
+        taskLog(item, "接收返回：未给 b64_json，收到 URL，开始下载图片");
+        const img = await fetch(`${IMAGE_PROXY}${encodeURIComponent(first.url)}`);
+        taskLog(item, `下载远程图片返回：HTTP ${img.status}`);
+        if (!img.ok) throw new Error(`下载远程图片失败：HTTP ${img.status}`);
+        blob = await img.blob();
+        taskLog(item, `下载远程图片完成：${formatBytes(blob.size)}`);
+      } else {
+        throw new Error(`接口没有返回图片：${text.slice(0, 300)}`);
+      }
+
+      revokeIfBlob(item.outputUrl);
+      item.outputBlob = blob;
+      item.outputUrl = URL.createObjectURL(blob);
+      item.status = "done";
+      item.message = "生成完成";
+      item.errorLog = "";
+      item.retryCount = 0;
+      item.retryAt = 0;
+      taskLog(item, "渲染预览：完成");
+      await cacheStatus(item, blob).catch((error) => taskLog(item, `缓存输出失败：${error.message}`));
+      taskLog(item, "缓存输出：完成");
+    }
+
+    function buildErrorLog(item, error) {
+      const message = error && error.message ? error.message : String(error);
+      const httpMatch = message.match(/^(HTTP \d+):\s*([\s\S]*)$/);
+      if (httpMatch) return `${httpMatch[1]}\n${httpMatch[2]}`;
+      if (message === "Failed to fetch") {
+        return "Failed to fetch\n浏览器没有连上本机代理。先运行 start-beecode-proxy.cmd，或打开 http://127.0.0.1:8787/health 检查代理。";
+      }
+      return message;
+    }
+
+    function failItem(item, error) {
+      if (isRetryableError(error) && enqueueRetry(item, error)) {
+        render();
+        pump();
+        return;
+      }
+      item.status = "error";
+      item.message = error && error.message ? error.message : String(error);
+      item.errorLog = buildErrorLog(item, error);
+      removeRetryQueue(item);
+      item.retryAt = 0;
+      taskLog(item, `失败：${item.errorLog.replace(/\n/g, " | ")}`);
+      cacheStatus(item).catch((cacheError) => taskLog(item, `缓存失败状态失败：${cacheError.message}`));
+    }
+
+    async function copyText(text) {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const area = document.createElement("textarea");
+        area.value = text;
+        document.body.appendChild(area);
+        area.select();
+        document.execCommand("copy");
+        area.remove();
+      }
+    }
+    function base64ToBlob(base64, type) {
+      const raw = atob(base64);
+      const bytes = new Uint8Array(raw.length);
+      for (let i = 0; i < raw.length; i += 1) bytes[i] = raw.charCodeAt(i);
+      return new Blob([bytes], { type });
+    }
+
+    async function chooseDownloadFolder() {
+      if (!window.showDirectoryPicker) {
+        alert("当前浏览器不支持选择下载文件夹，请用 Chrome/Edge 打开本地代理页面。");
+        return;
+      }
+      state.downloadDir = await window.showDirectoryPicker({ mode: "readwrite" });
+      el.folderName.textContent = state.downloadDir.name || "已选择";
+      notice(`下载文件夹：${el.folderName.textContent}`);
+    }
+
+
+    function setTranslateStatus(message) {
+      if (el.translateStatus) el.translateStatus.textContent = message || "";
+    }
+
+    async function translateListingText(text) {
+      const response = await fetch(TRANSLATE_ENDPOINT, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text })
+      });
+      const raw = await response.text();
+      if (!response.ok) throw new Error(`HTTP ${response.status}: ${raw.slice(0, 300)}`);
+      let payload;
+      try { payload = JSON.parse(raw); }
+      catch { throw new Error(`翻译返回不是 JSON：${raw.slice(0, 300)}`); }
+      const translated = String(payload.text || "").trim();
+      if (!translated) throw new Error("翻译返回为空");
+      return translated;
+    }
+
+    async function translateItemListing(item, index, total) {
+      const original = listingLabel(item);
+      if (!original) return false;
+      item.originalListing = item.originalListing || original;
+      taskLog(item, `翻译英文：开始 ${index}/${total}`, { renderNow: false });
+      const translated = await translateListingText(original);
+      item.listing = translated;
+      taskLog(item, `翻译英文：完成 ${shortName(translated, 90)}`, { renderNow: false });
+      await cacheStatus(item).catch((error) => taskLog(item, `缓存翻译失败：${error.message}`, { renderNow: false }));
+      return true;
+    }
+
+    async function translateAllListings() {
+      const targets = state.items.filter((item) => listingLabel(item));
+      if (!targets.length) return alert("当前没有可翻译的 listing。");
+      if (el.translateEnglish.disabled) return;
+      el.translateEnglish.disabled = true;
+      setTranslateStatus(`翻译中 0/${targets.length}`);
+      let cursor = 0;
+      let done = 0;
+      let failed = 0;
+      const worker = async () => {
+        while (cursor < targets.length) {
+          const index = cursor++;
+          const item = targets[index];
+          setTranslateStatus(`翻译中 ${done + failed}/${targets.length}`);
+          try {
+            await translateItemListing(item, index + 1, targets.length);
+            done += 1;
+          } catch (error) {
+            failed += 1;
+            taskLog(item, `翻译英文失败：${error.message}`);
+          }
+          if ((done + failed) % 3 === 0 || done + failed === targets.length) render();
+        }
+      };
+      try {
+        await Promise.all(Array.from({ length: Math.min(TRANSLATE_CONCURRENCY, targets.length) }, worker));
+        setTranslateStatus(`完成 ${done}/${targets.length}`);
+        notice(`翻译英文完成：成功 ${done}，失败 ${failed}`);
+        render();
+      } finally {
+        el.translateEnglish.disabled = false;
+      }
+    }
+    async function outputBlobForDownload(item) {
+      if (item.outputBlob) return item.outputBlob;
+      if (!item.outputUrl) return null;
+      const response = await fetch(item.outputUrl);
+      if (!response.ok) throw new Error(`读取生成图失败：HTTP ${response.status}`);
+      return response.blob();
+    }
+
+    async function downloadItem(item) {
+      if (!item || !item.outputUrl) return false;
+      if (!state.downloadDir) {
+        alert("请先点击 下载文件夹 选择保存位置。");
+        return false;
+      }
+      const blob = await outputBlobForDownload(item);
+      const baseName = downloadBaseName(item);
+      const fileName = `${baseName}.png`;
+      const handle = await state.downloadDir.getFileHandle(fileName, { create: true });
+      const writable = await handle.createWritable();
+      await writable.write(blob);
+      await writable.close();
+      taskLog(item, `已下载：${fileName}`);
+      return true;
+    }
+
+    async function downloadCurrentPage() {
+      if (!state.downloadDir) {
+        alert("请先点击 下载文件夹 选择保存位置。");
+        return;
+      }
+      const { start, end } = pageRange();
+      const pageItems = state.items.slice(start, end);
+      const targets = pageItems.filter((item) => item.outputUrl && item.status === "done");
+      if (!targets.length) return alert("当前页没有可下载的已完成图片。");
+      let ok = 0;
+      let failed = 0;
+      for (const item of targets) {
+        try {
+          if (await downloadItem(item)) ok += 1;
+        } catch (error) {
+          failed += 1;
+          taskLog(item, `下载失败：${error.message}`);
+        }
+      }
+      notice(`下载本页完成：成功 ${ok}，跳过 ${pageItems.length - targets.length}，失败 ${failed}`);
+    }
+
+
+    async function blobFromUrl(url) {
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`读取图片失败：HTTP ${response.status}`);
+      return response.blob();
+    }
+
+    async function bitmapFromBlob(blob) {
+      if (window.createImageBitmap) return createImageBitmap(blob);
+      const image = new Image();
+      image.decoding = "async";
+      image.src = URL.createObjectURL(blob);
+      try {
+        await image.decode();
+        return image;
+      } finally {
+        URL.revokeObjectURL(image.src);
+      }
+    }
+
+    function drawContain(ctx, image, x, y, width, height) {
+      const iw = image.width || image.naturalWidth || width;
+      const ih = image.height || image.naturalHeight || height;
+      const scale = Math.min(width / iw, height / ih);
+      const drawWidth = Math.round(iw * scale);
+      const drawHeight = Math.round(ih * scale);
+      const dx = x + Math.round((width - drawWidth) / 2);
+      const dy = y + Math.round((height - drawHeight) / 2);
+      ctx.drawImage(image, dx, dy, drawWidth, drawHeight);
+    }
+
+    function canvasToBlob(canvas, type = "image/jpeg", quality = 0.86) {
+      return new Promise((resolve, reject) => {
+        canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("合并图片导出失败")), type, quality);
+      });
+    }
+
+    async function saveBlob(blob, fileName) {
+      if (state.downloadDir) {
+        const handle = await state.downloadDir.getFileHandle(fileName, { create: true });
+        const writable = await handle.createWritable();
+        await writable.write(blob);
+        await writable.close();
+        return;
+      }
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+
+    function setMergeStatus(message) {
+      if (el.mergeStatus) el.mergeStatus.textContent = message || "";
+    }
+
+    function mergeLogToPageItems(items, message, renderNow = false) {
+      for (const item of items) taskLog(item, `合并本页：${message}`, { renderNow: false });
+      if (renderNow) render();
+    }
+
+    async function mergeCurrentPage() {
+      if (el.mergePage.disabled) return;
+      const { start, end } = pageRange();
+      const pageItems = state.items.slice(start, end).filter((item) => item.inputUrl);
+      if (!pageItems.length) {
+        setMergeStatus("当前页没有可合并原图");
+        return alert("当前页没有可合并的原图。");
+      }
+
+      el.mergePage.disabled = true;
+      setMergeStatus(`准备合并 0/${pageItems.length}`);
+      mergeLogToPageItems(pageItems, `开始，${pageItems.length} 张`, true);
+
+      try {
+        const cols = Math.ceil(Math.sqrt(pageItems.length));
+        const rows = Math.ceil(pageItems.length / cols);
+        const tile = 400;
+        const gap = 0;
+        const canvas = document.createElement("canvas");
+        canvas.width = cols * tile + (cols + 1) * gap;
+        canvas.height = rows * tile + (rows + 1) * gap;
+        const ctx = canvas.getContext("2d");
+        ctx.fillStyle = "#f2f2f2";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = "high";
+
+        let failed = 0;
+        for (let i = 0; i < pageItems.length; i += 1) {
+          const item = pageItems[i];
+          const col = i % cols;
+          const row = Math.floor(i / cols);
+          const x = gap + col * (tile + gap);
+          const y = gap + row * (tile + gap);
+          ctx.fillStyle = "#ffffff";
+          ctx.fillRect(x, y, tile, tile);
+          setMergeStatus(`合并中 ${i + 1}/${pageItems.length}`);
+          taskLog(item, `合并本页：读取 ${i + 1}/${pageItems.length}`, { renderNow: false });
+          try {
+            const blob = await blobFromUrl(item.inputUrl);
+            const bitmap = await bitmapFromBlob(blob);
+            drawContain(ctx, bitmap, x, y, tile, tile);
+            if (bitmap.close) bitmap.close();
+            taskLog(item, "合并本页：已写入画布", { renderNow: false });
+          } catch (error) {
+            failed += 1;
+            ctx.fillStyle = "#e8e8e8";
+            ctx.fillRect(x, y, tile, tile);
+            ctx.fillStyle = "#8a1f1b";
+            ctx.font = "14px Consolas, monospace";
+            ctx.fillText("LOAD FAILED", x + 14, y + 116);
+            taskLog(item, `合并本页：读取失败 ${error.message}`, { renderNow: false });
+            notice(`合并本页读取失败：${fileLabel(item)} / ${error.message}`);
+          }
+          const label = itemDisplayCode(item);
+          if (label) {
+            ctx.font = "bold 13px Consolas, monospace";
+            const labelWidth = Math.ceil(ctx.measureText(label).width) + 14;
+            ctx.fillStyle = "rgba(0, 0, 0, 0.82)";
+            ctx.fillRect(x + 5, y + 5, labelWidth, 22);
+            ctx.fillStyle = "#9ed4ff";
+            ctx.fillText(label, x + 12, y + 21);
+          }
+          if ((i + 1) % 5 === 0 || i === pageItems.length - 1) render();
+        }
+
+        setMergeStatus("导出图片...");
+        mergeLogToPageItems(pageItems, "开始导出图片", true);
+        const blob = await canvasToBlob(canvas, "image/jpeg", 0.94);
+        const fileName = cleanFileName(`contact-sheet-page-${state.page}-${new Date().toISOString().replace(/[:.]/g, "-")}.jpg`, "contact-sheet.jpg");
+        setMergeStatus("保存文件...");
+        await saveBlob(blob, fileName);
+        setMergeStatus(`完成：${pageItems.length - failed}/${pageItems.length}`);
+        mergeLogToPageItems(pageItems, `完成，失败 ${failed}，输出 ${fileName}`, true);
+        notice(`合并本页完成：${pageItems.length} 张，失败 ${failed}，输出 ${fileName}`);
+      } catch (error) {
+        setMergeStatus(`失败：${error.message}`);
+        mergeLogToPageItems(pageItems, `失败：${error.message}`, true);
+        throw error;
+      } finally {
+        el.mergePage.disabled = false;
+      }
+    }
+    function deleteItem(item) {
+      if (!item) return;
+      revokeIfBlob(item.inputUrl);
+      revokeIfBlob(item.outputUrl);
+      removeRetryQueue(item);
+      state.items = state.items.filter((entry) => entry.id !== item.id);
+      clampPage();
+      fetch(`${CACHE_ORIGIN}/cache/task?id=${encodeURIComponent(item.id)}`, { method: "DELETE" }).catch((error) => notice(`删除缓存失败：${error.message}`));
+      render();
+    }
+
+    el.pickFiles.addEventListener("click", () => el.files.click());
+    el.pickJson.addEventListener("click", () => el.jsonFile.click());
+    el.pickConfig.addEventListener("click", () => el.configFile.click());
+    el.chooseFolder.addEventListener("click", () => chooseDownloadFolder().catch((error) => notice(`选择下载文件夹失败：${error.message}`)));
+    el.downloadPage.addEventListener("click", () => downloadCurrentPage().catch((error) => notice(`下载本页失败：${error.message}`)));
+    if (el.translateEnglish) el.translateEnglish.addEventListener("click", () => translateAllListings().catch((error) => { setTranslateStatus(`失败：${error.message}`); notice(`翻译英文失败：${error.message}`); }).finally(() => { el.translateEnglish.disabled = false; }));
+    el.mergePage.addEventListener("click", () => mergeCurrentPage().catch((error) => { setMergeStatus(`失败：${error.message}`); notice(`合并本页失败：${error.message}`); })); 
+    el.similarity.addEventListener("input", () => {
+      el.similarityValue.textContent = `${selectedSimilarity()}%`;
+    });
+    document.querySelectorAll("[data-ratio]").forEach((button) => {
+      button.addEventListener("click", () => {
+        document.querySelectorAll("[data-ratio]").forEach((entry) => entry.classList.toggle("active", entry === button));
+      });
+    });
+    el.fillBlankPrompts.addEventListener("click", () => {
+      const prompt = el.prompt.value.trim();
+      if (!prompt) return alert("顶部提示词为空。");
+      let count = 0;
+      for (const item of state.items) {
+        if (item.prompt !== prompt) {
+          item.prompt = prompt;
+          count += 1;
+          schedulePromptCache(item);
+        }
+      }
+      render();
+      notice(`已覆盖 ${count} 条任务提示词`);
+    });
+    el.files.addEventListener("change", () => addFiles(el.files.files));
+    el.jsonFile.addEventListener("change", () => { if (el.jsonFile.files[0]) addJsonFile(el.jsonFile.files[0]); });
+    el.configFile.addEventListener("change", () => {
+      const file = el.configFile.files[0];
+      if (!file) return;
+      importConfigFile(file).catch((error) => alert(`配置导入失败：${error.message}`)).finally(() => { el.configFile.value = ""; });
+    });
+    el.firstPage.addEventListener("click", () => { state.page = 1; render(); });
+    el.prevPage.addEventListener("click", () => { state.page -= 1; render(); });
+    el.nextPage.addEventListener("click", () => { state.page += 1; render(); });
+    el.lastPage.addEventListener("click", () => { state.page = totalPages(); render(); });
+    el.start.addEventListener("click", startQueue);
+    el.stop.addEventListener("click", () => {
+      state.stopped = true;
+      clearRetryTimer();
+      for (const item of state.items.filter((entry) => entry.status === "queued" || entry.status === "running" || entry.status === "retry")) taskLog(item, "已停止继续派发新任务", { renderNow: false });
+      render();
+    });
+    el.clear.addEventListener("click", () => {
+      for (const item of state.items) {
+        revokeIfBlob(item.inputUrl);
+        revokeIfBlob(item.outputUrl);
+      }
+      state.items = [];
+      state.cursor = 0;
+      state.page = 1;
+      state.retryQueue = [];
+      clearRetryTimer();
+      fetch(`${CACHE_ORIGIN}/cache/tasks`, { method: "DELETE" }).catch((error) => notice(`清空缓存失败：${error.message}`));
+      render();
+    });
+
+    el.rows.addEventListener("click", (event) => {
+      const target = event.target.closest("[data-refetch], [data-run], [data-download], [data-delete], [data-copy-error]");
+      if (!target) return;
+      const id = target.dataset.refetch || target.dataset.run || target.dataset.download || target.dataset.delete || target.dataset.copyError;
+      const item = state.items.find((entry) => entry.id === id);
+      if (!item) return;
+      if (target.dataset.refetch) refetchJsonInput(item);
+      if (target.dataset.run) runItem(item).catch((error) => { failItem(item, error); }).finally(render);
+      if (target.dataset.download) downloadItem(item).catch((error) => taskLog(item, `下载失败：${error.message}`));
+      if (target.dataset.copyError) copyText(item.errorLog || item.message || "").then(() => taskLog(item, "失败日志已复制"));
+      if (target.dataset.delete) deleteItem(item);
+    });
+
+    el.rows.addEventListener("input", (event) => {
+      const promptBox = event.target.closest("[data-prompt]");
+      if (!promptBox) return;
+      const item = state.items.find((entry) => entry.id === promptBox.dataset.prompt);
+      if (!item) return;
+      item.prompt = promptBox.value;
+      schedulePromptCache(item);
+    });
+
+    loadCachedTasks().catch((error) => { notice(`恢复缓存失败：${error.message}`); render(); });
+  </script>
+</body>
+</html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
