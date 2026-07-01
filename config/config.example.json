@@ -1,0 +1,13 @@
+{
+  "beecode": {
+    "apiKey": "",
+    "baseUrl": "https://beecode.cc",
+    "model": "gpt-image-2",
+    "size": "1024x1024",
+    "concurrency": 3
+  },
+  "server": {
+    "host": "127.0.0.1",
+    "port": 8787
+  }
+}

@@ -517,11 +517,11 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
   </main>
 
   <script>
-    const API_ENDPOINT = "http://127.0.0.1:8787/v1/images/edits";
-    const IMAGE_PROXY = "http://127.0.0.1:8787/proxy-image?url=";
-    const CACHE_ORIGIN = "http://127.0.0.1:8787";
-    const CONFIG_ENDPOINT = "http://127.0.0.1:8787/config";
-    const TRANSLATE_ENDPOINT = "http://127.0.0.1:8787/translate-listing";
+    const API_ENDPOINT = "/v1/images/edits";
+    const IMAGE_PROXY = "/proxy-image?url=";
+    const CACHE_ORIGIN = "";
+    const CONFIG_ENDPOINT = "/api/config";
+    const TRANSLATE_ENDPOINT = "/translate-listing";
     const DEFAULT_CONFIG = { baseUrl: "https://beecode.cc", model: "gpt-image-2", size: "1024x1024", concurrency: 3 };
     let runtimeConfig = { ...DEFAULT_CONFIG };
     const PAGE_SIZE = 50;
@@ -576,7 +576,7 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       const text = await response.text();
       if (!response.ok) throw new Error(text.slice(0, 300));
       applyConfigSummary(JSON.parse(text));
-      notice("配置文件已写入 beecode.config.local.json");
+      notice("配置文件已写入 runtime/config.json");
     }
 
     function cacheUrl(value) {
@@ -625,6 +625,7 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       item.sourceCode = cached.sourceCode || item.sourceCode || "";
       item.displayCode = cached.displayCode || item.displayCode || itemDisplayCode(item);
       item.listing = typeof cached.listing === "string" ? cached.listing : (typeof item.listing === "string" ? item.listing : "");
+      item.sourceUrl = cached.sourceUrl || cached.imageurl || item.sourceUrl || "";
       item.createdAt = cached.createdAt || item.createdAt || nowText();
       item.status = cached.status || item.status;
       item.message = cached.message || item.message;
@@ -638,6 +639,18 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       item.retryCount = Number(cached.retryCount || item.retryCount || 0);
       item.retryAt = Number(cached.retryAt || item.retryAt || 0);
       item.cached = true;
+      return item;
+    }
+
+    function upsertServerTask(cached, renderNow = true) {
+      if (!cached || !cached.id) return null;
+      let item = state.items.find((entry) => entry.id === cached.id);
+      if (!item) {
+        item = { file: null, outputBlob: null };
+        state.items.push(item);
+      }
+      applyCachedTask(item, cached);
+      if (renderNow) render();
       return item;
     }
 
@@ -854,41 +867,22 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       catch (error) { alert(`JSON 解析失败：${error.message}`); return; }
       const rows = pickJsonRows(payload).filter((entry) => pickJsonImageUrl(entry));
       if (!rows.length) return alert("JSON 里没有找到 imageurl 字段。");
-      for (const entry of rows) {
-        const imageUrl = String(pickJsonImageUrl(entry)).trim();
-        const code = entry["编号"] || entry.code || entry.id || entry.sku || crypto.randomUUID();
-        const sourceCode = String(code);
-        const displayCode = codeSuffix(sourceCode);
-        const listing = entry.listing || entry.title || "";
-        const ext = extensionFromUrl(imageUrl);
-        const item = {
-          id: crypto.randomUUID(),
-          file: null,
-          fileName: `${cleanFileName(sourceCode, "json-image")}.${ext}`,
-          sourceCode,
-          displayCode,
-          listing: String(listing || ""),
-          inputType: ext === "png" ? "image/png" : ext === "webp" ? "image/webp" : "image/jpeg",
-          inputUrl: "",
-          sourceUrl: imageUrl,
-          outputUrl: "",
-          outputBlob: null,
-          status: "queued",
-          createdAt: nowText(),
-          message: "等待缓存原图",
-          prompt: "",
-          errorLog: "",
-          retryCount: 0,
-          retryAt: 0,
-          logs: []
-        };
-        state.items.push(item);
-        taskLog(item, `JSON导入：${shortName(String(code), 48)}`, { renderNow: false });
-        if (listing) taskLog(item, `listing：${shortName(String(listing), 90)}`, { renderNow: false });
-        enqueueJsonCache(item);
-      }
+
       el.jsonFile.value = "";
+      notice(`JSON 导入：提交 ${rows.length} 条到后台缓存队列`);
+      const response = await fetch("/api/intake/batch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items: rows })
+      });
+      const text = await response.text();
+      if (!response.ok) throw new Error(text.slice(0, 500));
+      const result = JSON.parse(text);
+      for (const entry of result.results || []) {
+        if (entry.task) upsertServerTask(entry.task, false);
+      }
       render();
+      notice(`JSON 导入完成：新增 ${result.accepted || 0}，重复 ${result.duplicates || 0}，无效 ${result.invalid || 0}`);
     }
 
     function enqueueJsonCache(item) {
@@ -985,6 +979,8 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       form.set("sourceCode", item.sourceCode || "");
       form.set("displayCode", item.displayCode || itemDisplayCode(item) || "");
       form.set("listing", listingLabel(item));
+      form.set("sourceUrl", item.sourceUrl || "");
+      form.set("imageurl", item.sourceUrl || "");
       form.set("errorLog", item.errorLog || "");
       form.set("retryCount", String(item.retryCount || 0));
       form.set("retryAt", String(item.retryAt || 0));
@@ -1021,6 +1017,8 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       form.set("sourceCode", item.sourceCode || "");
       form.set("displayCode", item.displayCode || itemDisplayCode(item) || "");
       form.set("listing", listingLabel(item));
+      form.set("sourceUrl", item.sourceUrl || "");
+      form.set("imageurl", item.sourceUrl || "");
       form.set("errorLog", item.errorLog || "");
       form.set("retryCount", String(item.retryCount || 0));
       form.set("retryAt", String(item.retryAt || 0));
@@ -1038,9 +1036,40 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       const text = await response.text();
       if (!response.ok) throw new Error(text.slice(0, 300));
       const tasks = JSON.parse(text);
-      state.items = tasks.map((task) => applyCachedTask({ file: null, outputBlob: null }, task));
+      state.items = tasks.map((task) => {
+        const item = applyCachedTask({ file: null, outputBlob: null }, task);
+        if (item.status === "running") {
+          item.status = "queued";
+          item.message = "等待生成";
+        }
+        return item;
+      });
       render();
+    }
 
+    function connectTaskEvents() {
+      const events = new EventSource("/api/events");
+      const receiveTask = (event) => {
+        try { upsertServerTask(JSON.parse(event.data)); }
+        catch (error) { notice(`SSE 任务解析失败：${error.message}`); }
+      };
+      events.addEventListener("task.created", receiveTask);
+      events.addEventListener("task.updated", receiveTask);
+      events.addEventListener("task.deleted", (event) => {
+        try {
+          const payload = JSON.parse(event.data);
+          state.items = state.items.filter((item) => item.id !== payload.id);
+          clampPage();
+          render();
+        } catch (error) { notice(`SSE 删除解析失败：${error.message}`); }
+      });
+      events.addEventListener("tasks.cleared", () => {
+        state.items = [];
+        state.page = 1;
+        render();
+      });
+      events.addEventListener("error", () => notice("SSE 连接暂时中断，浏览器将自动重连"));
+      return events;
     }
 
     async function getRunFile(item) {
@@ -1446,15 +1475,23 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       }
     }
 
-    function drawContain(ctx, image, x, y, width, height) {
+    function drawCover(ctx, image, x, y, width, height) {
       const iw = image.width || image.naturalWidth || width;
       const ih = image.height || image.naturalHeight || height;
-      const scale = Math.min(width / iw, height / ih);
-      const drawWidth = Math.round(iw * scale);
-      const drawHeight = Math.round(ih * scale);
-      const dx = x + Math.round((width - drawWidth) / 2);
-      const dy = y + Math.round((height - drawHeight) / 2);
-      ctx.drawImage(image, dx, dy, drawWidth, drawHeight);
+      const targetRatio = width / height;
+      const imageRatio = iw / ih;
+      let sx = 0;
+      let sy = 0;
+      let sw = iw;
+      let sh = ih;
+      if (imageRatio > targetRatio) {
+        sw = ih * targetRatio;
+        sx = (iw - sw) / 2;
+      } else {
+        sh = iw / targetRatio;
+        sy = (ih - sh) / 2;
+      }
+      ctx.drawImage(image, sx, sy, sw, sh, x, y, width, height);
     }
 
     function canvasToBlob(canvas, type = "image/jpeg", quality = 0.86) {
@@ -1504,9 +1541,9 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       mergeLogToPageItems(pageItems, `开始，${pageItems.length} 张`, true);
 
       try {
-        const cols = Math.ceil(Math.sqrt(pageItems.length));
-        const rows = Math.ceil(pageItems.length / cols);
-        const tile = 400;
+        const cols = 10;
+        const rows = 5;
+        const tile = 600;
         const gap = 0;
         const canvas = document.createElement("canvas");
         canvas.width = cols * tile + (cols + 1) * gap;
@@ -1531,7 +1568,7 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
           try {
             const blob = await blobFromUrl(item.inputUrl);
             const bitmap = await bitmapFromBlob(blob);
-            drawContain(ctx, bitmap, x, y, tile, tile);
+            drawCover(ctx, bitmap, x, y, tile, tile);
             if (bitmap.close) bitmap.close();
             taskLog(item, "合并本页：已写入画布", { renderNow: false });
           } catch (error) {
@@ -1539,19 +1576,19 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
             ctx.fillStyle = "#e8e8e8";
             ctx.fillRect(x, y, tile, tile);
             ctx.fillStyle = "#8a1f1b";
-            ctx.font = "14px Consolas, monospace";
+            ctx.font = "bold 34px Consolas, monospace";
             ctx.fillText("LOAD FAILED", x + 14, y + 116);
             taskLog(item, `合并本页：读取失败 ${error.message}`, { renderNow: false });
             notice(`合并本页读取失败：${fileLabel(item)} / ${error.message}`);
           }
           const label = itemDisplayCode(item);
           if (label) {
-            ctx.font = "bold 13px Consolas, monospace";
-            const labelWidth = Math.ceil(ctx.measureText(label).width) + 14;
+            ctx.font = "bold 52px Consolas, monospace";
+            const labelWidth = Math.ceil(ctx.measureText(label).width) + 34;
             ctx.fillStyle = "rgba(0, 0, 0, 0.82)";
-            ctx.fillRect(x + 5, y + 5, labelWidth, 22);
-            ctx.fillStyle = "#9ed4ff";
-            ctx.fillText(label, x + 12, y + 21);
+            ctx.fillRect(x + 10, y + 10, labelWidth, 76);
+            ctx.fillStyle = "#ffffff";
+            ctx.fillText(label, x + 27, y + 66);
           }
           if ((i + 1) % 5 === 0 || i === pageItems.length - 1) render();
         }
@@ -1667,65 +1704,8 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       schedulePromptCache(item);
     });
 
-    loadCachedTasks().catch((error) => { notice(`恢复缓存失败：${error.message}`); render(); });
+    loadConfig();
+    loadCachedTasks().catch((error) => { notice(`恢复缓存失败：${error.message}`); render(); }).finally(connectTaskEvents);
   </script>
 </body>
 </html>
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

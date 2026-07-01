@@ -3,6 +3,7 @@ claude-custom-beecode-image2.settings.json
 opencode-beecode-image-plugin.js
 
 beecode-cache/
+runtime/
 node_modules/
 build/
 .agents/
@@ -20,8 +21,9 @@ build/
 *.log
 
 !.gitignore
+!extension/temu-image-downloader/icons/*.png
 claude-beecode-image2.cmd
 claude-beecode-image2.ps1
 temu-california65-helper/
-temu-image-downloader/
+/temu-image-downloader/
 新建文件夹/

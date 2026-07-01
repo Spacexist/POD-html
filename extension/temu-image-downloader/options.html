@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>Temu Image Downloader — 设置</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #f7f7f7;
+      min-height: 100vh;
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      padding: 40px 20px;
+      color: #1a1a1a;
+    }
+
+    .card {
+      background: white;
+      border-radius: 16px;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.08);
+      padding: 32px;
+      width: 100%;
+      max-width: 440px;
+    }
+
+    .card-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 28px;
+    }
+
+    .logo {
+      width: 40px;
+      height: 40px;
+      background: linear-gradient(135deg, #ff6b35, #f7931e);
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .card-title {
+      font-size: 18px;
+      font-weight: 700;
+      color: #1a1a1a;
+    }
+
+    .card-subtitle {
+      font-size: 12px;
+      color: #888;
+      margin-top: 2px;
+    }
+
+    .form-group {
+      margin-bottom: 20px;
+    }
+
+    label {
+      display: block;
+      font-size: 13px;
+      font-weight: 600;
+      color: #444;
+      margin-bottom: 8px;
+    }
+
+    input[type="text"] {
+      width: 100%;
+      padding: 11px 14px;
+      border: 1.5px solid #e0e0e0;
+      border-radius: 10px;
+      font-size: 14px;
+      color: #1a1a1a;
+      transition: border-color 0.15s;
+      outline: none;
+    }
+
+    input[type="text"]:focus {
+      border-color: #ff6b35;
+      box-shadow: 0 0 0 3px rgba(255, 107, 53, 0.1);
+    }
+
+    .hint {
+      margin-top: 6px;
+      font-size: 11px;
+      color: #999;
+      line-height: 1.5;
+    }
+
+    .hint code {
+      background: #f3f3f3;
+      padding: 1px 5px;
+      border-radius: 4px;
+      font-family: monospace;
+      font-size: 11px;
+    }
+
+    .btn-save {
+      width: 100%;
+      padding: 12px;
+      background: linear-gradient(135deg, #ff6b35, #f7931e);
+      color: white;
+      border: none;
+      border-radius: 10px;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: opacity 0.15s, transform 0.1s;
+    }
+
+    .btn-save:hover {
+      opacity: 0.92;
+      transform: translateY(-1px);
+    }
+
+    .btn-save:active {
+      transform: translateY(0);
+    }
+
+    .toast {
+      margin-top: 14px;
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 500;
+      display: none;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .toast--success {
+      background: #f0fdf4;
+      color: #16a34a;
+      border: 1px solid #bbf7d0;
+    }
+
+    .toast--visible {
+      display: flex;
+    }
+
+    .divider {
+      border: none;
+      border-top: 1px solid #f0f0f0;
+      margin: 24px 0;
+    }
+
+    .path-preview {
+      font-size: 12px;
+      color: #666;
+      background: #f9f9f9;
+      border-radius: 8px;
+      padding: 10px 12px;
+      line-height: 1.6;
+    }
+
+    .path-preview strong {
+      color: #ff6b35;
+    }
+
+    /* 工作模式选项样式 */
+    .mode-container {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+
+    .mode-option-card {
+      border: 1.5px solid #e0e0e0;
+      border-radius: 12px;
+      padding: 14px 16px;
+      cursor: pointer;
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      transition: all 0.15s ease;
+    }
+
+    .mode-option-card:hover {
+      border-color: #ff6b35;
+      background: #fffbf9;
+    }
+
+    .mode-option-card.selected {
+      border-color: #ff6b35;
+      background: #fff7f2;
+      box-shadow: 0 0 0 3px rgba(255, 107, 53, 0.1);
+    }
+
+    .mode-option-card input[type="radio"] {
+      margin-top: 3px;
+      accent-color: #ff6b35;
+      cursor: pointer;
+    }
+
+    .mode-option-info {
+      display: flex;
+      flex-direction: column;
+      cursor: pointer;
+    }
+
+    .mode-option-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: #1a1a1a;
+    }
+
+    .mode-option-desc {
+      font-size: 11px;
+      color: #777;
+      margin-top: 4px;
+      line-height: 1.4;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="card-header">
+      <div class="logo">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="white" width="20" height="20">
+          <path d="M12 16l-5-5h3V4h4v7h3l-5 5zm-7 2h14v2H5v-2z"/>
+        </svg>
+      </div>
+      <div>
+        <div class="card-title">Temu Image Downloader</div>
+        <div class="card-subtitle">设置与工作模式</div>
+      </div>
+    </div>
+
+    <!-- 工作模式选择 -->
+    <div class="form-group">
+      <label>工作模式</label>
+      <div class="mode-container">
+        <label class="mode-option-card" id="label-mode-local">
+          <input type="radio" name="mode" id="mode-local" value="local">
+          <div class="mode-option-info">
+            <span class="mode-option-title">本地下载模式</span>
+            <span class="mode-option-desc">提取图片并以商品标题命名，直接下载并保存到本地文件夹。</span>
+          </div>
+        </label>
+        <label class="mode-option-card" id="label-mode-cache">
+          <input type="radio" name="mode" id="mode-cache" value="cache" checked>
+          <div class="mode-option-info">
+            <span class="mode-option-title">POD 模式（默认）</span>
+            <span class="mode-option-desc">按图片链接去重并同步到本地 POD 工作台；服务器离线时保留在扩展缓存，稍后自动同步。</span>
+          </div>
+        </label>
+      </div>
+    </div>
+
+    <!-- 本地模式配置区域 -->
+    <div class="form-group" id="local-config-sec">
+      <label for="subfolder">下载子文件夹名称</label>
+      <input
+        type="text"
+        id="subfolder"
+        placeholder="Temu"
+        autocomplete="off"
+        spellcheck="false"
+      />
+      <div class="hint">
+        支持多级路径，如 <code>Temu/项目A</code><br>
+        文件将保存至 Chrome 下载目录的此子文件夹中
+      </div>
+      <div class="path-preview" id="path-preview" style="margin-top: 12px;">
+        📁 Chrome下载目录 / <strong>Temu</strong> / 商品标题.jpg
+      </div>
+    </div>
+
+    <hr class="divider" />
+
+    <button class="btn-save" id="btn-save">保存设置</button>
+
+    <div class="toast toast--success" id="toast">
+      ✔ 设置已保存
+    </div>
+  </div>
+
+  <script src="options.js"></script>
+</body>
+</html>

@@ -1,0 +1,155 @@
+const fs = require("fs");
+const path = require("path");
+const { EventEmitter } = require("events");
+const { RUNTIME_ROOT, atomicWriteJson } = require("./config");
+
+const TASKS_PATH = path.join(RUNTIME_ROOT, "tasks.json");
+const CACHE_ROOT = path.join(RUNTIME_ROOT, "cache");
+const INPUT_DIR = path.join(CACHE_ROOT, "input");
+const OUTPUT_DIR = path.join(CACHE_ROOT, "output");
+const CONTACT_SHEET_DIR = path.join(CACHE_ROOT, "contact-sheets");
+
+function ensureRuntime() {
+  fs.mkdirSync(INPUT_DIR, { recursive: true });
+  fs.mkdirSync(OUTPUT_DIR, { recursive: true });
+  fs.mkdirSync(CONTACT_SHEET_DIR, { recursive: true });
+  if (!fs.existsSync(TASKS_PATH)) atomicWriteJson(TASKS_PATH, []);
+}
+
+function safeId(value) {
+  return String(value || "").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 100);
+}
+
+function parsePrompt(value) {
+  return String(value || "").slice(0, 20000);
+}
+
+function normalizeLogs(value) {
+  return Array.isArray(value) ? value.slice(0, 80).map((entry) => String(entry)) : [];
+}
+
+function taskUrl(kind, task) {
+  const stamp = encodeURIComponent(task.updatedAt || task.createdAt || "");
+  return `/cache/${kind}/${encodeURIComponent(task.id)}?t=${stamp}`;
+}
+
+function publicTask(task) {
+  return {
+    id: task.id,
+    fileName: task.fileName || "image",
+    sourceCode: task.sourceCode || "",
+    displayCode: task.displayCode || "",
+    listing: String(task.listing || ""),
+    imageurl: task.imageurl || task.sourceUrl || "",
+    sourceUrl: task.sourceUrl || task.imageurl || "",
+    createdAt: task.createdAt,
+    updatedAt: task.updatedAt,
+    status: task.status || "queued",
+    message: task.message || "等待生成",
+    prompt: parsePrompt(task.prompt),
+    errorLog: task.errorLog || "",
+    logs: normalizeLogs(task.logs),
+    retryCount: Number(task.retryCount || 0),
+    retryAt: Number(task.retryAt || 0),
+    inputUrl: task.inputFile ? taskUrl("input", task) : "",
+    outputUrl: task.outputFile ? taskUrl("output", task) : "",
+    inputType: task.inputType || "image/jpeg",
+    outputType: task.outputType || "image/png"
+  };
+}
+
+ensureRuntime();
+
+let tasks;
+try {
+  const parsed = JSON.parse(fs.readFileSync(TASKS_PATH, "utf8"));
+  tasks = Array.isArray(parsed) ? parsed : [];
+} catch {
+  tasks = [];
+}
+
+const events = new EventEmitter();
+
+function persist() {
+  atomicWriteJson(TASKS_PATH, tasks);
+}
+
+function list() {
+  return tasks;
+}
+
+function findById(id) {
+  const cleanId = safeId(id);
+  return tasks.find((task) => task.id === cleanId);
+}
+
+function findByImageUrl(imageurl) {
+  const target = String(imageurl || "").trim();
+  if (!target) return undefined;
+  return tasks.find((task) => String(task.imageurl || task.sourceUrl || "").trim() === target);
+}
+
+function upsert(update, eventName = "task.updated") {
+  const id = safeId(update && update.id);
+  if (!id) throw new Error("任务缺少合法 id");
+  const index = tasks.findIndex((task) => task.id === id);
+  const next = {
+    ...(index >= 0 ? tasks[index] : {}),
+    ...update,
+    id,
+    prompt: parsePrompt(update.prompt !== undefined ? update.prompt : (index >= 0 ? tasks[index].prompt : "")),
+    logs: normalizeLogs(update.logs !== undefined ? update.logs : (index >= 0 ? tasks[index].logs : [])),
+    updatedAt: new Date().toISOString()
+  };
+  if (!next.createdAt) next.createdAt = new Date().toLocaleString("zh-CN", { hour12: false });
+  if (index >= 0) tasks[index] = next;
+  else tasks.push(next);
+  persist();
+  events.emit(eventName, publicTask(next));
+  return next;
+}
+
+function remove(id) {
+  const cleanId = safeId(id);
+  const index = tasks.findIndex((task) => task.id === cleanId);
+  if (index < 0) return undefined;
+  const [removed] = tasks.splice(index, 1);
+  persist();
+  events.emit("task.deleted", { id: cleanId });
+  return removed;
+}
+
+function clear() {
+  tasks = [];
+  persist();
+  events.emit("tasks.cleared", { ok: true });
+}
+
+function isInsideCache(filePath) {
+  if (!filePath) return false;
+  const root = `${path.resolve(CACHE_ROOT)}${path.sep}`.toLowerCase();
+  return path.resolve(filePath).toLowerCase().startsWith(root);
+}
+
+function removeFile(filePath) {
+  if (isInsideCache(filePath)) fs.rmSync(filePath, { force: true });
+}
+
+module.exports = {
+  TASKS_PATH,
+  CACHE_ROOT,
+  INPUT_DIR,
+  OUTPUT_DIR,
+  CONTACT_SHEET_DIR,
+  events,
+  ensureRuntime,
+  safeId,
+  list,
+  findById,
+  findByImageUrl,
+  upsert,
+  remove,
+  clear,
+  removeFile,
+  publicTask
+};

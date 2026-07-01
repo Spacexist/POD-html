@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Temu Image Downloader</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      width: 250px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #fdfdfd;
+      color: #1f2937;
+    }
+
+    .header {
+      background: linear-gradient(135deg, #ff6b35, #f7931e);
+      padding: 14px 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .header-icon {
+      width: 24px;
+      height: 24px;
+      background: rgba(255,255,255,0.25);
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .header-title {
+      color: white;
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.3px;
+    }
+
+    .body {
+      padding: 16px;
+    }
+
+    .section {
+      margin-bottom: 14px;
+    }
+
+    .info-label {
+      font-size: 11px;
+      color: #6b7280;
+      margin-bottom: 5px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .info-value {
+      font-size: 13px;
+      color: #1f2937;
+      font-weight: 500;
+      background: #f3f4f6;
+      border-radius: 8px;
+      padding: 8px 12px;
+      word-break: break-all;
+    }
+
+    .btn {
+      display: block;
+      width: 100%;
+      padding: 9px;
+      border: none;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      text-align: center;
+      transition: background 0.15s, transform 0.1s;
+      margin-bottom: 8px;
+      outline: none;
+    }
+
+    .btn:active {
+      transform: scale(0.98);
+    }
+
+    .btn-primary {
+      background: #ff6b35;
+      color: white;
+    }
+
+    .btn-primary:hover {
+      background: #e55a28;
+    }
+
+    .btn-secondary {
+      background: #e5e7eb;
+      color: #374151;
+    }
+
+    .btn-secondary:hover {
+      background: #d1d5db;
+    }
+
+    .btn-danger {
+      background: #fef2f2;
+      color: #ef4444;
+      border: 1px solid #fee2e2;
+    }
+
+    .btn-danger:hover {
+      background: #fee2e2;
+    }
+
+    .divider {
+      border: none;
+      border-top: 1px solid #f3f4f6;
+      margin: 14px 0;
+    }
+
+    .tip {
+      font-size: 10px;
+      color: #9ca3af;
+      text-align: center;
+      line-height: 1.4;
+      margin-top: 8px;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="header-icon">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="white" width="14" height="14">
+        <path d="M12 16l-5-5h3V4h4v7h3l-5 5zm-7 2h14v2H5v-2z"/>
+      </svg>
+    </div>
+    <span class="header-title">Temu Image Downloader</span>
+  </div>
+
+  <div class="body">
+    <div class="section">
+      <div class="info-label">当前模式</div>
+      <div class="info-value" id="current-mode">本地模式 (直接下载)</div>
+    </div>
+
+    <!-- 本地模式下显示文件夹 -->
+    <div class="section" id="folder-section">
+      <div class="info-label">保存文件夹</div>
+      <div class="info-value" id="current-folder" style="margin-bottom: 8px;">Temu</div>
+      <div style="display: flex; align-items: center; justify-content: space-between; font-size: 11px; color: #4b5563; background: #f3f4f6; border-radius: 6px; padding: 6px 10px;">
+        <span>本地下载序号计数器: <strong id="local-count-val" style="color: #ff6b35;">0</strong></span>
+        <button class="btn btn-secondary" id="btn-reset-local-count" style="margin: 0; padding: 2px 8px; font-size: 10px; width: auto; height: auto; border: 1px solid #d1d5db;">重置</button>
+      </div>
+    </div>
+
+    <!-- POD 模式下显示待同步缓存与操作 -->
+    <div class="section" id="cache-section" style="display: none;">
+      <div class="info-label">POD 同步缓存</div>
+
+      <!-- 绑定 JSON 文件 -->
+      <div style="margin-bottom: 12px;">
+        <button class="btn btn-secondary" id="btn-select-json" style="margin-bottom: 6px; display: flex; align-items: center; justify-content: center; gap: 4px;">
+          📂 选择并绑定已有 JSON
+        </button>
+        <input type="file" id="input-file-json" accept=".json" style="display: none;">
+        <div id="bound-status" style="font-size: 11px; color: #059669; padding: 6px 8px; display: none; background: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 6px; word-break: break-all;">
+          🟢 已绑定: <strong id="bound-filename">无</strong>
+        </div>
+      </div>
+
+      <div class="info-value" id="cache-count" style="margin-bottom: 8px;">已缓存商品: 0 个</div>
+      <button class="btn btn-primary" id="btn-export">📥 导出更新后的 JSON</button>
+      <button class="btn btn-danger" id="btn-clear-cache">🗑️ 清空缓存与绑定</button>
+    </div>
+
+    <hr class="divider">
+
+    <button class="btn btn-secondary" id="open-settings">⚙ 设置选项</button>
+
+    <p class="tip">悬停网页中商品图片<br>点击出现的下载图标即可操作</p>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

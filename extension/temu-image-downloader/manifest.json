@@ -1,0 +1,54 @@
+{
+  "manifest_version": 3,
+  "name": "Temu POD Image Collector",
+  "version": "2.0.0",
+  "description": "采集 Temu 商品图，按 imageurl 去重并同步到本地 POD 工作台",
+  "permissions": [
+    "downloads",
+    "storage"
+  ],
+  "host_permissions": [
+    "https://www.temu.com/*",
+    "https://img.kwcdn.com/*",
+    "https://aimg.kwcdn.com/*",
+    "http://127.0.0.1:8787/*",
+    "http://localhost:8787/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.temu.com/*",
+        "file:///*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "css": [
+        "content.css"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "http://127.0.0.1:8787/*",
+        "http://localhost:8787/*"
+      ],
+      "js": [
+        "pod-bridge.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "options_page": "options.html"
+}
