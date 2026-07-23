@@ -189,6 +189,33 @@
       white-space: nowrap;
     }
 
+    .risk-bubbles {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 0 0 10px;
+    }
+
+    .risk-card {
+      min-width: 190px;
+      max-width: 360px;
+      padding: 9px 12px;
+      border: 1px solid #3a3a3a;
+      border-radius: 14px;
+      background: #171717;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .risk-card strong { color: var(--blue); margin-right: 8px; }
+    .risk-card span { color: var(--muted); }
+    .risk-card p { margin: 4px 0 0; color: var(--text); }
+    .risk-high { border-color: #cc4d43; background: rgba(204, 77, 67, 0.12); }
+    .risk-medium { border-color: #bd852b; background: rgba(189, 133, 43, 0.12); }
+    .risk-low { border-color: #367eb7; background: rgba(54, 126, 183, 0.12); }
+    .risk-empty { color: var(--ok); }
+    .risk-error { border-color: #cc4d43; color: #ff8d84; }
+
     textarea {
       width: 100%;
       height: 76px;
@@ -461,7 +488,7 @@
         <button id="downloadPage">下载本页</button>
         <button id="translateEnglish">一键翻译英文</button>
         <span id="translateStatus" class="merge-status"></span>
-        <button id="mergePage">合并本页</button>
+        <button id="mergePage">侵权查询</button>
         <span id="mergeStatus" class="merge-status"></span>
         <button id="start">批量生成</button>
         <button id="stop">停止</button>
@@ -493,6 +520,7 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       <div class="progress"><div id="bar" class="bar"></div></div>
       <div id="progressText" class="progress-text">0 / 0</div>
     </div>
+    <section id="infringementResults" class="risk-bubbles" aria-live="polite"></section>
 
     <section class="table">
       <div class="thead">
@@ -522,7 +550,8 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
     const CACHE_ORIGIN = "";
     const CONFIG_ENDPOINT = "/api/config";
     const TRANSLATE_ENDPOINT = "/translate-listing";
-    const DEFAULT_CONFIG = { baseUrl: "https://beecode.cc", model: "gpt-image-2", size: "1024x1024", concurrency: 3 };
+    const INFRINGEMENT_CHECK_ENDPOINT = "/api/infringement-check";
+    const DEFAULT_CONFIG = { baseUrl: "https://beecode.cc", endpoint: "/v1/images/edits", model: "gpt-image-2", size: "1024x1024", concurrency: 3 };
     let runtimeConfig = { ...DEFAULT_CONFIG };
     const PAGE_SIZE = 50;
     const RETRY_DELAY_MS = 3000;
@@ -537,12 +566,13 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
     const el = Object.fromEntries(Array.from(document.querySelectorAll("[id]")).map((node) => [node.id, node]));
 
     function remoteEndpoint() {
-      return `${runtimeConfig.baseUrl.replace(/\/$/, "")}/v1/images/edits`;
+      return `${runtimeConfig.baseUrl.replace(/\/$/, "")}${runtimeConfig.endpoint}`;
     }
 
     function applyConfigSummary(config) {
       runtimeConfig = {
         baseUrl: (config.baseUrl || DEFAULT_CONFIG.baseUrl).replace(/\/$/, ""),
+        endpoint: config.endpoint || DEFAULT_CONFIG.endpoint,
         model: config.model || DEFAULT_CONFIG.model,
         size: config.size || DEFAULT_CONFIG.size,
         concurrency: Math.max(1, Number(config.concurrency || DEFAULT_CONFIG.concurrency))
@@ -616,7 +646,17 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       if (item.displayCode) return item.displayCode;
       if (item.sourceCode) return codeSuffix(item.sourceCode);
       const base = fileLabel(item).replace(/\.[^.]+$/, "");
-      return /^\d{8,}[_-].+/.test(base) ? codeSuffix(base) : "";
+      if (/^\d{8,}[_-].+/.test(base)) return codeSuffix(base);
+      item.displayCode = nextFallbackDisplayCode();
+      return item.displayCode;
+    }
+
+    function nextFallbackDisplayCode() {
+      const max = state.items.reduce((current, item) => {
+        const match = String(item.displayCode || "").match(/^A-(\d+)$/i);
+        return match ? Math.max(current, Number(match[1])) : current;
+      }, 0);
+      return `A-${max + 1}`;
     }
 
     function applyCachedTask(item, cached) {
@@ -831,7 +871,7 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
           outputUrl: "",
           outputBlob: null,
           sourceCode: "",
-          displayCode: "",
+          displayCode: nextFallbackDisplayCode(),
           status: "queued",
           createdAt: nowText(),
           message: "等待生成",
@@ -1238,10 +1278,10 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       form.set("image", runFile, fileLabel(item));
       taskLog(item, `组装 request：model=${runtimeConfig.model} size=${runtimeConfig.size} prompt=${prompt.length} chars image=multipart`);
 
-      item.message = "请求 BeeCode";
+      item.message = "请求图片中转";
       render();
       taskLog(item, `request 发送：POST ${remoteEndpoint()}`);
-      taskLog(item, "等待 BeeCode 返回...");
+      taskLog(item, "等待图片中转返回...");
       const response = await fetch(API_ENDPOINT, {
         method: "POST",
         body: form
@@ -1293,7 +1333,7 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       const httpMatch = message.match(/^(HTTP \d+):\s*([\s\S]*)$/);
       if (httpMatch) return `${httpMatch[1]}\n${httpMatch[2]}`;
       if (message === "Failed to fetch") {
-        return "Failed to fetch\n浏览器没有连上本机代理。先运行 start-beecode-proxy.cmd，或打开 http://127.0.0.1:8787/health 检查代理。";
+        return "Failed to fetch\n浏览器没有连上本机代理。请运行 start.cmd，或打开 http://127.0.0.1:8787/health 检查代理。";
       }
       return message;
     }
@@ -1500,6 +1540,76 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       });
     }
 
+    async function blobToDataUrl(blob) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ""));
+        reader.onerror = () => reject(reader.error || new Error("审核图片读取失败"));
+        reader.readAsDataURL(blob);
+      });
+    }
+
+    async function contactSheetReviewBlob(canvas) {
+      const maxWidth = 4096;
+      if (canvas.width <= maxWidth) return canvasToBlob(canvas, "image/jpeg", 0.86);
+      const reviewCanvas = document.createElement("canvas");
+      reviewCanvas.width = maxWidth;
+      reviewCanvas.height = Math.round(canvas.height * maxWidth / canvas.width);
+      const ctx = reviewCanvas.getContext("2d");
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = "high";
+      ctx.drawImage(canvas, 0, 0, reviewCanvas.width, reviewCanvas.height);
+      return canvasToBlob(reviewCanvas, "image/jpeg", 0.86);
+    }
+
+    function renderInfringementResults(items, errorMessage = "") {
+      if (!el.infringementResults) return;
+      el.infringementResults.textContent = "";
+      const addCard = (className, number, risk, reason) => {
+        const card = document.createElement("article");
+        card.className = `risk-card ${className}`;
+        const title = document.createElement("strong");
+        title.textContent = number;
+        const level = document.createElement("span");
+        level.textContent = risk;
+        const detail = document.createElement("p");
+        detail.textContent = reason;
+        card.append(title, level, detail);
+        el.infringementResults.appendChild(card);
+      };
+      if (errorMessage) return addCard("risk-error", "侵权审核失败", "", errorMessage);
+      if (!items.length) return addCard("risk-empty", "侵权审核", "未发现风险", "当前合并图未识别到明确侵权风险项。");
+      for (const item of items) {
+        const className = item.risk === "高" ? "risk-high" : item.risk === "中" ? "risk-medium" : "risk-low";
+        addCard(className, `编号 ${item.number}`, `${item.risk}风险`, item.reason);
+      }
+    }
+
+    async function checkMergedImageForInfringement(canvas, pageItems) {
+      setMergeStatus("侵权审核中...");
+      mergeLogToPageItems(pageItems, "侵权审核：上传合并图", true);
+      const image = await blobToDataUrl(await contactSheetReviewBlob(canvas));
+      const response = await fetch(INFRINGEMENT_CHECK_ENDPOINT, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ image })
+      });
+      const raw = await response.text();
+      let payload;
+      try { payload = JSON.parse(raw); }
+      catch { throw new Error(`侵权审核返回不是 JSON：${raw.slice(0, 300)}`); }
+      if (!response.ok) throw new Error(payload.error && payload.error.message ? payload.error.message : raw.slice(0, 300));
+      const items = Array.isArray(payload.items) ? payload.items : [];
+      renderInfringementResults(items);
+      for (const riskItem of items) {
+        const task = pageItems.find((item) => itemDisplayCode(item) === riskItem.number);
+        if (task) taskLog(task, `侵权审核：${riskItem.risk}风险 / ${riskItem.reason}`, { renderNow: false });
+      }
+      setMergeStatus(`侵权审核完成：${items.length} 项`);
+      mergeLogToPageItems(pageItems, `侵权审核完成，发现 ${items.length} 项`, true);
+      return items;
+    }
+
     async function saveBlob(blob, fileName) {
       if (state.downloadDir) {
         const handle = await state.downloadDir.getFileHandle(fileName, { create: true });
@@ -1599,7 +1709,14 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
         const fileName = cleanFileName(`contact-sheet-page-${state.page}-${new Date().toISOString().replace(/[:.]/g, "-")}.jpg`, "contact-sheet.jpg");
         setMergeStatus("保存文件...");
         await saveBlob(blob, fileName);
-        setMergeStatus(`完成：${pageItems.length - failed}/${pageItems.length}`);
+        try {
+          await checkMergedImageForInfringement(canvas, pageItems);
+        } catch (error) {
+          renderInfringementResults([], error.message);
+          setMergeStatus(`合并完成，侵权审核失败：${error.message}`);
+          mergeLogToPageItems(pageItems, `侵权审核失败：${error.message}`, true);
+          notice(`侵权审核失败：${error.message}`);
+        }
         mergeLogToPageItems(pageItems, `完成，失败 ${failed}，输出 ${fileName}`, true);
         notice(`合并本页完成：${pageItems.length} 张，失败 ${failed}，输出 ${fileName}`);
       } catch (error) {

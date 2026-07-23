@@ -90,18 +90,24 @@ runtime/config.json
 首次使用：
 
 1. 参考 `config/config.example.json` 创建配置文件。
-2. 填入 BeeCode API Key。
+2. 填入 BeeCode 与 Moonshot API Key。
 3. 在 POD 页面点击“配置文件”并导入。
 4. 后台校验后原子写入 `runtime/config.json`，以后刷新或重启不需要重复选择。
 
 ```json
 {
-  "beecode": {
+  "imageApi": {
     "apiKey": "",
     "baseUrl": "https://beecode.cc",
+    "endpoint": "/v1/images/edits",
     "model": "gpt-image-2",
     "size": "1024x1024",
     "concurrency": 3
+  },
+  "moonshot": {
+    "apiKey": "",
+    "baseUrl": "https://api.moonshot.cn/v1",
+    "model": "kimi-k2.6"
   },
   "server": {
     "host": "127.0.0.1",
@@ -109,6 +115,8 @@ runtime/config.json
   }
 }
 ```
+
+`imageApi` 是通用图片中转配置。切换 BeeCode、CCCode 或其他 OpenAI 兼容中转时，只需替换 `apiKey`、`baseUrl`；接口路径不同再修改 `endpoint`，无需改代码。旧版 `beecode` 字段仍可导入，服务端会自动兼容。
 
 `runtime/` 已被 Git 整目录忽略。接口和页面只返回脱敏 Key，完整 Key 不会出现在仓库或浏览器响应中。
 
@@ -177,6 +185,8 @@ JPEG quality: 0.94
 
 每张图片等比铺满并居中裁切；左上角使用约 52px 白色粗体编号，编号读取任务 `displayCode` 或 JSON `编号` 后缀。缺图会写入任务日志，但不会阻塞其他图片输出。
 
+合并图保存后会自动缩放至 4K 以内，发送到 Moonshot 中国区的 `kimi-k2.6` 进行侵权风险审核。审核结果以气泡卡片显示编号、风险等级和原因；没有发现风险项时也会显示明确结果。完整 API Key 仅保存在本地配置，浏览器只调用本地代理。
+
 ## 数据与安全
 
 | 路径 | 内容 | 是否提交 Git |
@@ -204,6 +214,7 @@ JPEG quality: 0.94
 | `POST` | `/api/intake/retry` | 重新获取远程原图 |
 | `GET` | `/api/events` | SSE 任务事件流 |
 | `POST` | `/v1/images/edits` | BeeCode 图片编辑代理 |
+| `POST` | `/api/infringement-check` | Moonshot 合并图侵权审核代理 |
 
 SSE 事件包括：
 

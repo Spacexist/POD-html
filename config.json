@@ -1,7 +1,7 @@
 {
   "imageApi": {
     "apiKey": "",
-    "baseUrl": "https://beecode.cc",
+    "baseUrl": "https://beeapi.ai",
     "endpoint": "/v1/images/edits",
     "model": "gpt-image-2",
     "size": "1024x1024",

@@ -8,6 +8,8 @@ node_modules/
 build/
 .agents/
 .codex/
+__pycache__/
+*.pyc
 
 *.exe
 *.xlsx

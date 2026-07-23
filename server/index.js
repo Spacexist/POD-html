@@ -11,6 +11,33 @@ const APP_PATH = path.join(ROOT, "app", "index.html");
 const LOG_PATH = path.join(RUNTIME_ROOT, "logs", "server.log");
 const sse = createSseHub();
 const intake = createIntake({ store });
+const INFRINGEMENT_RESPONSE_FORMAT = {
+  type: "json_schema",
+  json_schema: {
+    name: "infringement_risk_report",
+    strict: true,
+    schema: {
+      type: "object",
+      properties: {
+        items: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              number: { type: "string" },
+              reason: { type: "string" },
+              risk: { type: "string", enum: ["低", "中", "高"] }
+            },
+            required: ["number", "reason", "risk"],
+            additionalProperties: false
+          }
+        }
+      },
+      required: ["items"],
+      additionalProperties: false
+    }
+  }
+};
 
 for (const eventName of ["task.created", "task.updated", "task.deleted", "tasks.cleared"]) {
   store.events.on(eventName, (payload) => sse.publish(eventName, payload));
@@ -258,14 +285,14 @@ function clearTasks(res) {
 }
 
 async function proxyImageEdit(req, res) {
-  const config = getConfig().beecode;
+  const config = getConfig().imageApi;
   if (!config.apiKey) {
-    return sendJson(res, 500, { error: { message: "runtime/config.json 未配置 BeeCode API Key，请点击左上角配置文件导入", type: "proxy_config_error" } });
+    return sendJson(res, 500, { error: { message: "runtime/config.json 未配置图片中转 API Key，请点击左上角配置文件导入", type: "proxy_config_error" } });
   }
   let body;
   try { body = await readBody(req); }
   catch (error) { return sendJson(res, 413, { error: { message: error.message, type: "proxy_body_error" } }); }
-  const target = `${config.baseUrl}/v1/images/edits`;
+  const target = `${config.baseUrl}${config.endpoint}`;
   try {
     const upstream = await fetch(target, {
       method: "POST",
@@ -278,14 +305,73 @@ async function proxyImageEdit(req, res) {
     const upstreamBody = Buffer.from(await upstream.arrayBuffer());
     return send(res, upstream.status, upstreamBody, {
       "Content-Type": upstream.headers.get("content-type") || "application/octet-stream",
-      "X-BeeCode-Target": target
+      "X-Image-Api-Target": target
     });
   } catch (error) {
-    appendServerLog(`BeeCode proxy failed: ${error.message}`);
+    appendServerLog(`image API proxy failed: ${error.message}`);
     return sendJson(res, 502, {
       error: { message: error.message || String(error), type: error.name || "ProxyFetchError" },
       proxy: { target }
     });
+  }
+}
+
+function normalizeInfringementItems(value) {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 50).map((item) => ({
+    number: String(item && item.number || "").trim().slice(0, 80),
+    reason: String(item && item.reason || "").trim().slice(0, 500),
+    risk: ["低", "中", "高"].includes(item && item.risk) ? item.risk : "低"
+  })).filter((item) => item.number && item.reason);
+}
+
+async function checkInfringement(req, res) {
+  const config = getConfig().moonshot;
+  if (!config.apiKey) {
+    return sendJson(res, 500, { error: { message: "runtime/config.json 未配置 Moonshot API Key", type: "moonshot_config_error" } });
+  }
+  let payload;
+  try { payload = await readJsonBody(req, 35 * 1024 * 1024); }
+  catch (error) { return sendJson(res, 400, { error: { message: error.message, type: "bad_json" } }); }
+  const image = String(payload.image || "");
+  if (!/^data:image\/(?:png|jpe?g|webp);base64,[A-Za-z0-9+/=]+$/i.test(image)) {
+    return sendJson(res, 400, { error: { message: "缺少合法的合并图片", type: "invalid_image" } });
+  }
+  const target = `${config.baseUrl}/chat/completions`;
+  const requestBody = {
+    model: config.model,
+    messages: [
+      {
+        role: "system",
+        content: "你是图片侵权风险审核助手。仅列出有明确或较高可能侵权风险的图片编号；编号来自图片左上角标签。没有风险项时返回空数组。reason 用简短中文说明依据；risk 只能是低、中、高。不要臆测无法从图中识别的信息。"
+      },
+      {
+        role: "user",
+        content: [
+          { type: "image_url", image_url: { url: image } },
+          { type: "text", text: "请审核这张合并图，并按既定 JSON Schema 返回。" }
+        ]
+      }
+    ],
+    response_format: INFRINGEMENT_RESPONSE_FORMAT,
+    max_tokens: 2048
+  };
+  try {
+    const upstream = await fetch(target, {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${config.apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify(requestBody)
+    });
+    const raw = await upstream.text();
+    if (!upstream.ok) return send(res, upstream.status, raw, { "Content-Type": "application/json; charset=utf-8" });
+    const response = JSON.parse(raw);
+    const content = response && response.choices && response.choices[0] && response.choices[0].message && response.choices[0].message.content;
+    if (!content) throw new Error("Moonshot 未返回审核结果");
+    const result = JSON.parse(content);
+    return sendJson(res, 200, { ok: true, items: normalizeInfringementItems(result.items) });
+  } catch (error) {
+    appendServerLog(`Moonshot infringement check failed: ${error.message}`);
+    return sendJson(res, 502, { error: { message: error.message, type: error.name || "MoonshotProxyError" } });
   }
 }
 
@@ -395,6 +481,7 @@ const server = http.createServer(async (req, res) => {
   if (req.method === "POST" && url.pathname === "/api/intake/retry") return retryIntake(req, res);
   if (req.method === "GET" && url.pathname === "/proxy-image") return proxyImageDownload(req, res, url);
   if (req.method === "POST" && url.pathname === "/translate-listing") return proxyTranslateListing(req, res);
+  if (req.method === "POST" && url.pathname === "/api/infringement-check") return checkInfringement(req, res);
   if (req.method === "GET" && ["/cache/tasks", "/api/tasks"].includes(url.pathname)) return sendJson(res, 200, store.list().map(store.publicTask));
   if (req.method === "POST" && url.pathname === "/cache/input") return cacheInput(req, res);
   if (req.method === "POST" && url.pathname === "/cache/output") return cacheOutput(req, res);

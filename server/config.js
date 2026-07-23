@@ -6,12 +6,18 @@ const RUNTIME_ROOT = path.join(ROOT, "runtime");
 const CONFIG_PATH = path.join(RUNTIME_ROOT, "config.json");
 
 const DEFAULT_CONFIG = {
-  beecode: {
+  imageApi: {
     apiKey: "",
     baseUrl: "https://beecode.cc",
+    endpoint: "/v1/images/edits",
     model: "gpt-image-2",
     size: "1024x1024",
     concurrency: 3
+  },
+  moonshot: {
+    apiKey: "",
+    baseUrl: "https://api.moonshot.cn/v1",
+    model: "kimi-k2.6"
   },
   server: {
     host: "127.0.0.1",
@@ -26,25 +32,37 @@ function atomicWriteJson(filePath, value) {
   fs.renameSync(tempPath, filePath);
 }
 
+function normalizeEndpoint(value) {
+  const endpoint = String(value || DEFAULT_CONFIG.imageApi.endpoint).trim();
+  return endpoint.startsWith("/") ? endpoint : `/${endpoint}`;
+}
+
 function normalizeConfig(input = {}) {
-  const beecode = input.beecode || input;
+  const imageApi = input.imageApi || input.beecode || input;
+  const moonshot = input.moonshot || {};
   const server = input.server || {};
   const apiKey = String(
-    beecode.apiKey ||
-    beecode.OPENAI_API_KEY ||
-    (beecode.env && beecode.env.OPENAI_API_KEY) ||
+    imageApi.apiKey ||
+    imageApi.OPENAI_API_KEY ||
+    (imageApi.env && imageApi.env.OPENAI_API_KEY) ||
     ""
   ).trim();
 
   return {
-    beecode: {
+    imageApi: {
       apiKey,
-      baseUrl: String(beecode.baseUrl || beecode.OPENAI_BASE_URL || DEFAULT_CONFIG.beecode.baseUrl)
+      baseUrl: String(imageApi.baseUrl || imageApi.OPENAI_BASE_URL || DEFAULT_CONFIG.imageApi.baseUrl)
         .trim()
         .replace(/\/+$/, ""),
-      model: String(beecode.model || DEFAULT_CONFIG.beecode.model).trim(),
-      size: String(beecode.size || DEFAULT_CONFIG.beecode.size).trim(),
-      concurrency: Math.max(1, Math.floor(Number(beecode.concurrency || DEFAULT_CONFIG.beecode.concurrency)))
+      endpoint: normalizeEndpoint(imageApi.endpoint),
+      model: String(imageApi.model || DEFAULT_CONFIG.imageApi.model).trim(),
+      size: String(imageApi.size || DEFAULT_CONFIG.imageApi.size).trim(),
+      concurrency: Math.max(1, Math.floor(Number(imageApi.concurrency || DEFAULT_CONFIG.imageApi.concurrency)))
+    },
+    moonshot: {
+      apiKey: String(moonshot.apiKey || moonshot.MOONSHOT_API_KEY || process.env.MOONSHOT_API_KEY || "").trim(),
+      baseUrl: String(moonshot.baseUrl || DEFAULT_CONFIG.moonshot.baseUrl).trim().replace(/\/+$/, ""),
+      model: String(moonshot.model || DEFAULT_CONFIG.moonshot.model).trim()
     },
     server: {
       host: String(server.host || DEFAULT_CONFIG.server.host).trim(),
@@ -72,8 +90,8 @@ function getConfig() {
 
 function replaceConfig(input) {
   const next = normalizeConfig(input);
-  if (!next.beecode.apiKey) {
-    throw new Error("配置缺少 beecode.apiKey / apiKey / OPENAI_API_KEY");
+  if (!next.imageApi.apiKey) {
+    throw new Error("配置缺少 imageApi.apiKey / apiKey / OPENAI_API_KEY");
   }
   atomicWriteJson(CONFIG_PATH, next);
   currentConfig = next;
@@ -86,17 +104,25 @@ function maskKey(apiKey) {
 }
 
 function publicConfig(config = currentConfig) {
-  const beecode = config.beecode;
+  const imageApi = config.imageApi;
+  const moonshot = config.moonshot;
   return {
     ok: true,
-    hasKey: Boolean(beecode.apiKey),
-    key: maskKey(beecode.apiKey),
+    hasKey: Boolean(imageApi.apiKey),
+    key: maskKey(imageApi.apiKey),
     keySource: "runtime/config.json",
-    baseUrl: beecode.baseUrl,
-    target: `${beecode.baseUrl}/v1/images/edits`,
-    model: beecode.model,
-    size: beecode.size,
-    concurrency: beecode.concurrency,
+    baseUrl: imageApi.baseUrl,
+    endpoint: imageApi.endpoint,
+    target: `${imageApi.baseUrl}${imageApi.endpoint}`,
+    model: imageApi.model,
+    size: imageApi.size,
+    concurrency: imageApi.concurrency,
+    moonshot: {
+      hasKey: Boolean(moonshot.apiKey),
+      key: maskKey(moonshot.apiKey),
+      baseUrl: moonshot.baseUrl,
+      model: moonshot.model
+    },
     configPath: CONFIG_PATH,
     cache: path.join(RUNTIME_ROOT, "cache")
   };

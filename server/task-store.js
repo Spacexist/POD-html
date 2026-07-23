@@ -68,11 +68,29 @@ try {
   tasks = [];
 }
 
+function nextFallbackDisplayCode() {
+  const max = tasks.reduce((current, task) => {
+    const match = String(task.displayCode || "").match(/^A-(\d+)$/i);
+    return match ? Math.max(current, Number(match[1])) : current;
+  }, 0);
+  return `A-${max + 1}`;
+}
+
+let displayCodeUpdated = false;
+for (const task of tasks) {
+  if (!String(task.displayCode || "").trim()) {
+    task.displayCode = nextFallbackDisplayCode();
+    displayCodeUpdated = true;
+  }
+}
+
 const events = new EventEmitter();
 
 function persist() {
   atomicWriteJson(TASKS_PATH, tasks);
 }
+
+if (displayCodeUpdated) persist();
 
 function list() {
   return tasks;
@@ -102,6 +120,7 @@ function upsert(update, eventName = "task.updated") {
     updatedAt: new Date().toISOString()
   };
   if (!next.createdAt) next.createdAt = new Date().toLocaleString("zh-CN", { hour12: false });
+  if (!String(next.displayCode || "").trim()) next.displayCode = nextFallbackDisplayCode();
   if (index >= 0) tasks[index] = next;
   else tasks.push(next);
   persist();
