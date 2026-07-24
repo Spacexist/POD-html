@@ -8,6 +8,12 @@ class ElementExtractionModule {
   constructor() {
     this.items = [];
     this.results = new Map();
+    this.resultSets = new Map();
+    this.resultSets.set("affix", this.results);
+    this.activeMode = "affix";
+    this.activeProduct = "";
+    this.productPrompts = new Map();
+    this.editingProductName = "";
     this.running = false;
     this.nextBatchIndex = 0;
     this.completedBatchCount = 0;
@@ -25,15 +31,26 @@ class ElementExtractionModule {
       thinkingEnabled: false,
       prefix: "",
       suffix: "",
-      prompt: ""
+      prompt: "",
+      promptProductOutput: ""
     };
     this.handlePatternTabClick = this.handlePatternTabClick.bind(this);
     this.handleElementTabClick = this.handleElementTabClick.bind(this);
+    this.handleMockupTabClick = this.handleMockupTabClick.bind(this);
     this.handleChooseFolderClick = this.handleChooseFolderClick.bind(this);
     this.handleFolderChange = this.handleFolderChange.bind(this);
     this.handleRunClick = this.handleRunClick.bind(this);
     this.handleRetryClick = this.handleRetryClick.bind(this);
     this.handleThinkingClick = this.handleThinkingClick.bind(this);
+    this.handleAffixModeClick = this.handleAffixModeClick.bind(this);
+    this.handleProductModeClick = this.handleProductModeClick.bind(this);
+    this.handleProductSelectChange = this.handleProductSelectChange.bind(this);
+    this.handleManageProductsClick = this.handleManageProductsClick.bind(this);
+    this.handleProductDialogCloseClick = this.handleProductDialogCloseClick.bind(this);
+    this.handleProductListChange = this.handleProductListChange.bind(this);
+    this.handleProductNewClick = this.handleProductNewClick.bind(this);
+    this.handleProductSaveClick = this.handleProductSaveClick.bind(this);
+    this.handleProductDeleteClick = this.handleProductDeleteClick.bind(this);
     this.handleAffixChange = this.handleAffixChange.bind(this);
     this.handleSaveClick = this.handleSaveClick.bind(this);
     this.handleRemoveSpacesClick = this.handleRemoveSpacesClick.bind(this);
@@ -61,8 +78,10 @@ class ElementExtractionModule {
     this.elements = {
       patternTab: document.getElementById("patternRedrawTab"),
       elementTab: document.getElementById("elementExtractionTab"),
+      mockupTab: document.getElementById("mockupTab"),
       patternModule: document.getElementById("patternRedrawModule"),
       elementModule: document.getElementById("elementExtractionModule"),
+      mockupModule: document.getElementById("mockupModule"),
       patternActions: document.getElementById("patternRedrawActions"),
       chooseFolder: document.getElementById("elementChooseFolder"),
       folderInput: document.getElementById("elementFolderInput"),
@@ -71,8 +90,14 @@ class ElementExtractionModule {
       empty: document.getElementById("elementEmpty"),
       imageGrid: document.getElementById("elementImageGrid"),
       providerState: document.getElementById("elementProviderState"),
+      affixMode: document.getElementById("elementAffixMode"),
+      productMode: document.getElementById("elementProductMode"),
+      affixFields: document.getElementById("elementAffixFields"),
+      productFields: document.getElementById("elementProductFields"),
       prefix: document.getElementById("elementPrefix"),
       suffix: document.getElementById("elementSuffix"),
+      productSelect: document.getElementById("elementProductSelect"),
+      manageProducts: document.getElementById("elementManageProducts"),
       concurrency: document.getElementById("elementConcurrency"),
       thinkingToggle: document.getElementById("elementThinkingToggle"),
       run: document.getElementById("elementRun"),
@@ -86,8 +111,18 @@ class ElementExtractionModule {
       progressText: document.getElementById("elementProgressText"),
       progressValue: document.getElementById("elementProgressValue"),
       progressBar: document.getElementById("elementProgressBar"),
+      sourceColumnHeader: document.getElementById("elementSourceColumnHeader"),
+      finalColumnHeader: document.getElementById("elementFinalColumnHeader"),
       resultsBody: document.getElementById("elementResultsBody"),
-      log: document.getElementById("elementLog")
+      log: document.getElementById("elementLog"),
+      productDialog: document.getElementById("elementProductDialog"),
+      productDialogClose: document.getElementById("elementProductDialogClose"),
+      productList: document.getElementById("elementProductList"),
+      productName: document.getElementById("elementProductName"),
+      productPrompt: document.getElementById("elementProductPrompt"),
+      productNew: document.getElementById("elementProductNew"),
+      productSave: document.getElementById("elementProductSave"),
+      productDelete: document.getElementById("elementProductDelete")
     };
   }
 
@@ -95,11 +130,21 @@ class ElementExtractionModule {
   bindEvents() {
     this.elements.patternTab.addEventListener("click", this.handlePatternTabClick);
     this.elements.elementTab.addEventListener("click", this.handleElementTabClick);
+    this.elements.mockupTab.addEventListener("click", this.handleMockupTabClick);
     this.elements.chooseFolder.addEventListener("click", this.handleChooseFolderClick);
     this.elements.folderInput.addEventListener("change", this.handleFolderChange);
     this.elements.run.addEventListener("click", this.handleRunClick);
     this.elements.retry.addEventListener("click", this.handleRetryClick);
     this.elements.thinkingToggle.addEventListener("click", this.handleThinkingClick);
+    this.elements.affixMode.addEventListener("click", this.handleAffixModeClick);
+    this.elements.productMode.addEventListener("click", this.handleProductModeClick);
+    this.elements.productSelect.addEventListener("change", this.handleProductSelectChange);
+    this.elements.manageProducts.addEventListener("click", this.handleManageProductsClick);
+    this.elements.productDialogClose.addEventListener("click", this.handleProductDialogCloseClick);
+    this.elements.productList.addEventListener("change", this.handleProductListChange);
+    this.elements.productNew.addEventListener("click", this.handleProductNewClick);
+    this.elements.productSave.addEventListener("click", this.handleProductSaveClick);
+    this.elements.productDelete.addEventListener("click", this.handleProductDeleteClick);
     this.elements.prefix.addEventListener("change", this.handleAffixChange);
     this.elements.suffix.addEventListener("change", this.handleAffixChange);
     this.elements.save.addEventListener("click", this.handleSaveClick);
@@ -181,6 +226,7 @@ class ElementExtractionModule {
       this.elements.suffix.value = this.config.suffix;
       this.elements.concurrency.value = String(this.config.concurrency);
       this.renderThinkingToggle();
+      await this.loadProductSettings();
       this.hasMoonshotKey = Boolean(payload.moonshot && payload.moonshot.hasKey);
       const model = payload.moonshot && payload.moonshot.model ? payload.moonshot.model : "未配置模型";
       this.elements.providerState.textContent = this.hasMoonshotKey
@@ -192,6 +238,277 @@ class ElementExtractionModule {
       this.elements.providerState.textContent = `配置读取失败：${error.message}`;
       this.appendLog("ERROR", `配置读取失败：${error.message}`);
     }
+  }
+
+  /** 从根目录配置接口读取 Listing 产品、默认模式和公共输出模板。 */
+  async loadProductSettings() {
+    const response = await fetch("/api/element-products", { cache: "no-store" });
+    const raw = await response.text();
+    if (!response.ok) throw new Error(raw.slice(0, 300));
+    const payload = JSON.parse(raw);
+    this.applyProductPayload(payload);
+    const initialMode = payload.mode === "product" ? "product" : "affix";
+    this.switchExtractionMode(initialMode, false);
+  }
+
+  /** 应用产品接口返回值并刷新使用端下拉框和管理列表。 */
+  applyProductPayload(payload) {
+    const previousProduct = this.activeProduct;
+    this.productPrompts.clear();
+    const products = Array.isArray(payload.products) ? payload.products : [];
+    for (let index = 0; index < products.length; index += 1) {
+      const name = String(products[index] && products[index].name || "").trim();
+      const prompt = String(products[index] && products[index].prompt || "").trim();
+      if (name && prompt) this.productPrompts.set(name, prompt);
+    }
+    this.config.promptProductOutput = String(payload.promptProductOutputModel || "");
+    let nextProduct = String(payload.productName || "").trim();
+    if (!nextProduct || !this.productPrompts.has(nextProduct)) {
+      nextProduct = this.productPrompts.has(previousProduct)
+        ? previousProduct
+        : this.firstProductName();
+    }
+    this.activeProduct = nextProduct;
+    this.renderProductOptions();
+  }
+
+  /** 返回当前配置中的第一个 Listing 产品名称。 */
+  firstProductName() {
+    const names = this.productPrompts.keys();
+    const first = names.next();
+    return first.done ? "" : first.value;
+  }
+
+  /** 刷新 Listing 使用下拉框和产品管理列表。 */
+  renderProductOptions() {
+    this.elements.productSelect.replaceChildren();
+    this.elements.productList.replaceChildren();
+    const entries = this.productPrompts.entries();
+    let next = entries.next();
+    while (!next.done) {
+      const productName = next.value[0];
+      const selectOption = document.createElement("option");
+      selectOption.value = productName;
+      selectOption.textContent = productName;
+      this.elements.productSelect.appendChild(selectOption);
+      const listOption = document.createElement("option");
+      listOption.value = productName;
+      listOption.textContent = productName;
+      this.elements.productList.appendChild(listOption);
+      next = entries.next();
+    }
+    this.elements.productSelect.value = this.activeProduct;
+    this.elements.productList.value = this.editingProductName;
+    this.elements.productDelete.disabled = this.productPrompts.size <= 1 || !this.editingProductName;
+  }
+
+  /** 返回当前模式和产品对应的独立结果缓存键。 */
+  currentResultKey(modeName = this.activeMode, productName = this.activeProduct) {
+    return modeName === "product" ? `product:${productName}` : "affix";
+  }
+
+  /** 保存当前结果引用并切换到目标模式或产品的独立结果集合。 */
+  switchResultContext(modeName, productName) {
+    this.syncEdits();
+    this.resultSets.set(this.currentResultKey(), this.results);
+    this.activeMode = modeName === "product" ? "product" : "affix";
+    if (productName !== undefined) this.activeProduct = String(productName || "");
+    const nextKey = this.currentResultKey();
+    if (!this.resultSets.has(nextKey)) this.resultSets.set(nextKey, new Map());
+    this.results = this.resultSets.get(nextKey);
+  }
+
+  /** 激活当前模式的结果集合，不再次保存旧上下文。 */
+  activateCurrentResultSet() {
+    const resultKey = this.currentResultKey();
+    if (!this.resultSets.has(resultKey)) this.resultSets.set(resultKey, new Map());
+    this.results = this.resultSets.get(resultKey);
+  }
+
+  /** 清空所有模式和产品结果，并为当前上下文创建空结果集合。 */
+  clearAllResultSets() {
+    this.resultSets.clear();
+    this.results = new Map();
+    this.resultSets.set(this.currentResultKey(), this.results);
+  }
+
+  /** 切换元素提取内部模式并刷新字段、表头、按钮与结果。 */
+  switchExtractionMode(modeName, persist = true) {
+    if (this.running) return;
+    const nextMode = modeName === "product" ? "product" : "affix";
+    if (nextMode === "product" && !this.activeProduct) {
+      window.alert("请先通过“管理产品”添加至少一个 Listing 产品。");
+      return;
+    }
+    this.switchResultContext(nextMode, this.activeProduct);
+    const isProductMode = this.activeMode === "product";
+    this.elements.affixMode.classList.toggle("active", !isProductMode);
+    this.elements.productMode.classList.toggle("active", isProductMode);
+    this.elements.affixFields.classList.toggle("hidden", isProductMode);
+    this.elements.productFields.classList.toggle("hidden", !isProductMode);
+    this.elements.run.textContent = isProductMode ? "开始生成 Listing" : "开始提取";
+    this.elements.sourceColumnHeader.textContent = isProductMode ? "模型原始 Listing" : "提取元素";
+    this.elements.finalColumnHeader.textContent = isProductMode ? "最终 Listing" : "前后缀组合结果";
+    this.renderResults();
+    if (persist) this.persistExtractionMode();
+  }
+
+  /** 将当前模式写入根目录产品配置，失败时只记录日志。 */
+  async persistExtractionMode() {
+    try {
+      await this.postProductAction({ action: "mode", mode: this.activeMode });
+    } catch (error) {
+      this.appendLog("WARN", `模式保存失败：${error.message}`);
+    }
+  }
+
+  /** 切换到前后缀元素提取模式。 */
+  handleAffixModeClick() {
+    this.switchExtractionMode("affix");
+  }
+
+  /** 切换到产品 Listing 生成模式。 */
+  handleProductModeClick() {
+    this.switchExtractionMode("product");
+  }
+
+  /** 切换当前 Listing 产品并恢复该产品独立结果。 */
+  async handleProductSelectChange() {
+    if (this.running) return;
+    const nextProduct = String(this.elements.productSelect.value || "");
+    if (!this.productPrompts.has(nextProduct)) return;
+    this.switchResultContext("product", nextProduct);
+    this.renderResults();
+    try {
+      await this.postProductAction({ action: "select", name: nextProduct });
+    } catch (error) {
+      this.appendLog("WARN", `默认产品保存失败：${error.message}`);
+    }
+  }
+
+  /** 打开产品管理弹窗并选中当前产品。 */
+  handleManageProductsClick() {
+    this.editingProductName = this.activeProduct;
+    this.renderProductOptions();
+    this.loadProductEditor(this.editingProductName);
+    this.elements.productDialog.showModal();
+  }
+
+  /** 关闭产品管理弹窗。 */
+  handleProductDialogCloseClick() {
+    this.elements.productDialog.close();
+  }
+
+  /** 将指定产品内容载入编辑表单。 */
+  loadProductEditor(productName) {
+    const name = String(productName || "");
+    this.editingProductName = this.productPrompts.has(name) ? name : "";
+    this.elements.productName.value = this.editingProductName;
+    this.elements.productPrompt.value = this.editingProductName
+      ? this.productPrompts.get(this.editingProductName)
+      : "";
+    this.elements.productList.value = this.editingProductName;
+    this.elements.productDelete.disabled = this.productPrompts.size <= 1 || !this.editingProductName;
+  }
+
+  /** 从管理列表切换当前正在编辑的产品。 */
+  handleProductListChange() {
+    this.loadProductEditor(this.elements.productList.value);
+  }
+
+  /** 清空产品编辑表单，进入新增状态。 */
+  handleProductNewClick() {
+    this.loadProductEditor("");
+    this.elements.productName.focus();
+  }
+
+  /** 新增或更新产品配置，并立即刷新使用端产品下拉框。 */
+  async handleProductSaveClick() {
+    const name = this.elements.productName.value.trim();
+    const prompt = this.elements.productPrompt.value.trim();
+    if (!name || !prompt) {
+      window.alert("产品名称和 Prompt 不能为空。");
+      return;
+    }
+    const action = this.editingProductName ? "update" : "create";
+    try {
+      this.syncEdits();
+      this.resultSets.set(this.currentResultKey(), this.results);
+      const payload = await this.postProductAction({
+        action,
+        originalName: this.editingProductName,
+        name,
+        prompt
+      });
+      const oldName = this.editingProductName;
+      if (oldName && oldName !== name) {
+        const oldKey = `product:${oldName}`;
+        const newKey = `product:${name}`;
+        if (this.resultSets.has(oldKey) && !this.resultSets.has(newKey)) {
+          this.resultSets.set(newKey, this.resultSets.get(oldKey));
+        }
+        this.resultSets.delete(oldKey);
+      }
+      this.applyProductPayload(payload);
+      this.activeProduct = name;
+      this.editingProductName = name;
+      this.renderProductOptions();
+      this.loadProductEditor(name);
+      if (this.activeMode === "product") {
+        this.activateCurrentResultSet();
+        this.renderResults();
+      }
+      this.appendLog("PRODUCT", `${action === "create" ? "新增" : "修改"}产品：${name}`);
+    } catch (error) {
+      window.alert(`产品保存失败：${error.message}`);
+    }
+  }
+
+  /** 删除当前产品，并切换到服务器返回的下一个可用产品。 */
+  async handleProductDeleteClick() {
+    const name = this.editingProductName;
+    if (!name) return;
+    if (!window.confirm(`确认删除产品“${name}”及其 Prompt？`)) return;
+    try {
+      this.syncEdits();
+      this.resultSets.set(this.currentResultKey(), this.results);
+      const payload = await this.postProductAction({ action: "delete", name });
+      this.resultSets.delete(`product:${name}`);
+      this.applyProductPayload(payload);
+      this.editingProductName = this.activeProduct;
+      this.renderProductOptions();
+      this.loadProductEditor(this.editingProductName);
+      if (this.activeMode === "product") {
+        this.activateCurrentResultSet();
+        this.renderResults();
+      }
+      this.appendLog("PRODUCT", `已删除产品：${name}`);
+    } catch (error) {
+      window.alert(`产品删除失败：${error.message}`);
+    }
+  }
+
+  /** 调用根目录产品配置接口并返回更新后的产品列表。 */
+  async postProductAction(body) {
+    const response = await fetch("/api/element-products", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    });
+    const raw = await response.text();
+    let payload;
+    try {
+      payload = JSON.parse(raw);
+    } catch (error) {
+      throw new Error(`产品配置返回不是 JSON：${raw.slice(0, 200)}`);
+    }
+    if (!response.ok) {
+      const message = payload.error && payload.error.message
+        ? payload.error.message
+        : raw.slice(0, 200);
+      throw new Error(message);
+    }
+    return payload;
   }
 
   /** 将数值限制在指定整数范围内。 */
@@ -211,15 +528,31 @@ class ElementExtractionModule {
     this.switchModule("elementExtraction");
   }
 
+  /** 切换到独立套图生成页面，并保留其他模块的当前内存状态。 */
+  handleMockupTabClick() {
+    this.switchModule("mockup");
+  }
+
   /** 切换模块视图，同时保留各模块当前内存状态。 */
   switchModule(moduleName) {
     const showElement = moduleName === "elementExtraction";
-    this.elements.patternTab.classList.toggle("active", !showElement);
+    const showMockup = moduleName === "mockup";
+    const showPattern = !showElement && !showMockup;
+    this.elements.patternTab.classList.toggle("active", showPattern);
     this.elements.elementTab.classList.toggle("active", showElement);
-    this.elements.patternModule.classList.toggle("hidden", showElement);
+    this.elements.mockupTab.classList.toggle("active", showMockup);
+    this.elements.patternModule.classList.toggle("hidden", !showPattern);
     this.elements.elementModule.classList.toggle("hidden", !showElement);
-    this.elements.patternActions.classList.toggle("hidden", showElement);
-    document.title = showElement ? "元素提取 · POD 图像工作台" : "印花重绘 · POD 图像工作台";
+    this.elements.mockupModule.classList.toggle("hidden", !showMockup);
+    this.elements.patternActions.classList.toggle("hidden", !showPattern);
+    document.body.classList.toggle("mockup-mode", showMockup);
+    if (showMockup) {
+      document.title = "套图生成 · POD 图像工作台";
+    } else if (showElement) {
+      document.title = "元素提取 · POD 图像工作台";
+    } else {
+      document.title = "印花重绘 · POD 图像工作台";
+    }
   }
 
   /** 打开浏览器目录选择器。 */
@@ -231,7 +564,7 @@ class ElementExtractionModule {
   handleFolderChange(event) {
     this.releaseImageUrls();
     this.items = [];
-    this.results.clear();
+    this.clearAllResultSets();
     const seenIds = new Set();
     const files = event.target.files;
     let duplicateCount = 0;
@@ -350,6 +683,16 @@ class ElementExtractionModule {
       window.alert("请先通过左上角配置文件设置 shared.moonshot.apiKey。");
       return;
     }
+    if (this.activeMode === "product") {
+      if (!this.activeProduct || !this.productPrompts.has(this.activeProduct)) {
+        window.alert("请先选择一个已配置的 Listing 产品。");
+        return;
+      }
+      if (!String(this.config.promptProductOutput || "").trim()) {
+        window.alert("根目录 config.json 缺少 elementExtraction.prompt_product_output_model。");
+        return;
+      }
+    }
     this.results.clear();
     this.renderResults();
     await this.runExtraction(this.items, false);
@@ -399,6 +742,7 @@ class ElementExtractionModule {
 
   /** 在提取完成后将当前前后缀重新应用到全部内存结果。 */
   handleAffixChange() {
+    if (this.activeMode !== "affix") return;
     if (!this.results.size) return;
     this.syncEdits();
     this.applyAffixesToResults();
@@ -424,10 +768,18 @@ class ElementExtractionModule {
   /** 创建批次和并发工作线程，并保证单批失败不阻塞其他批次。 */
   async runExtraction(itemsToProcess, isRetry) {
     const extractionStartedAt = performance.now();
+    const isProductMode = this.activeMode === "product";
     this.running = true;
     this.setBusyState(true);
     if (!isRetry) this.clearLog();
-    this.appendLog("START", isRetry ? "开始重试未识别图片" : "开始批量提取元素");
+    this.appendLog(
+      "START",
+      isRetry
+        ? `开始重试${isProductMode ? " Listing" : "未识别图片"}`
+        : isProductMode
+          ? "开始批量生成 Listing"
+          : "开始批量提取元素"
+    );
     const batches = this.createBatches(itemsToProcess, this.config.batchSize);
     this.nextBatchIndex = 0;
     this.completedBatchCount = 0;
@@ -444,10 +796,17 @@ class ElementExtractionModule {
       "PLAN",
       `图片 ${itemsToProcess.length} 张 / 批次 ${batches.length} 组 / 每组最多 ${this.config.batchSize} 张 / 工作线程 ${workerCount}`
     );
-    this.appendLog(
-      "PLAN",
-      `固定后台提示词 / ${this.config.thinkingEnabled ? "推理模式" : "不推理快速模式"} / 前缀 ${this.elements.prefix.value.length} 字符 / 后缀 ${this.elements.suffix.value.length} 字符`
-    );
+    if (isProductMode) {
+      this.appendLog(
+        "PLAN",
+        `Listing 模式 / 产品 ${this.activeProduct} / ${this.config.thinkingEnabled ? "推理模式" : "不推理快速模式"}`
+      );
+    } else {
+      this.appendLog(
+        "PLAN",
+        `前后缀模式 / ${this.config.thinkingEnabled ? "推理模式" : "不推理快速模式"} / 前缀 ${this.elements.prefix.value.length} 字符 / 后缀 ${this.elements.suffix.value.length} 字符`
+      );
+    }
     const workers = [];
     for (let index = 0; index < workerCount; index += 1) {
       this.appendLog(`W${index + 1}`, "工作线程已创建");
@@ -523,6 +882,8 @@ class ElementExtractionModule {
     this.requestGroupNumbers.set(requestId, batchNumber);
     const itemIds = [];
     for (let index = 0; index < batch.length; index += 1) itemIds.push(batch[index].id);
+    this.markBatchProcessing(batch);
+    this.renderResults();
     this.appendLog(
       logTag,
       `第 ${batchNumber} 组开始，请求编号 ${requestId}，货号：${itemIds.join(", ")}`
@@ -566,6 +927,20 @@ class ElementExtractionModule {
       logTag,
       `第 ${batchNumber} 组合并完成：返回 ${rows.length} 条 / 请求 ${itemIds.length} 条 / 耗时 ${Math.round(performance.now() - batchStartedAt)}ms`
     );
+  }
+
+  /** 将当前已被工作线程领取的批次标记为处理中。 */
+  markBatchProcessing(batch) {
+    for (let index = 0; index < batch.length; index += 1) {
+      const item = batch[index];
+      const previous = this.results.get(item.id);
+      this.results.set(item.id, {
+        element: previous && previous.element !== "提取失败" ? previous.element : "正在识别…",
+        fullName: previous && previous.fullName ? previous.fullName : "—",
+        status: "处理中",
+        error: ""
+      });
+    }
   }
 
   /** 将失败批次的全部图片标记为待重试。 */
@@ -735,9 +1110,25 @@ class ElementExtractionModule {
 
   /** 将当前批次货号注入配置提示词，生成直接发送给后台的 prompt。 */
   buildPrompt(itemIds) {
+    const itemIdText = itemIds.join(", ");
+    if (this.activeMode === "product") {
+      const productPrompt = String(this.productPrompts.get(this.activeProduct) || "").trim();
+      const outputTemplate = String(this.config.promptProductOutput || "").trim();
+      if (!productPrompt) throw new Error(`产品“${this.activeProduct}”未配置 Prompt`);
+      if (!outputTemplate) {
+        throw new Error("elementExtraction.prompt_product_output_model 未配置");
+      }
+      const businessPrompt = productPrompt
+        .replace(/\{product_name\}/g, this.activeProduct)
+        .replace(/\{item_ids\}/g, itemIdText);
+      const outputPrompt = outputTemplate
+        .replace(/\{product_name\}/g, this.activeProduct)
+        .replace(/\{item_ids\}/g, itemIdText);
+      return `${businessPrompt}\n\n${outputPrompt}`.trim();
+    }
     const template = String(this.config.prompt || "").trim();
     if (!template) throw new Error("elementExtraction.prompt_prefix_model 未配置");
-    return template.replace(/\{item_ids\}/g, itemIds.join(", "));
+    return template.replace(/\{item_ids\}/g, itemIdText);
   }
 
   /** 将大型图片 Data URL 折叠为可读摘要，避免日志渲染数十万字符。 */
@@ -759,6 +1150,7 @@ class ElementExtractionModule {
 
   /** 把元素描述与当前前后缀组合为完整结果。 */
   combineResult(description) {
+    if (this.activeMode === "product") return String(description || "");
     return `${this.elements.prefix.value}${description}${this.elements.suffix.value}`;
   }
 
@@ -779,22 +1171,24 @@ class ElementExtractionModule {
       idCell.textContent = item.id;
       const elementCell = document.createElement("td");
       elementCell.dataset.field = "element";
-      elementCell.contentEditable = result ? "true" : "false";
+      elementCell.contentEditable = result && result.status === "已完成" ? "true" : "false";
       elementCell.textContent = result ? result.element : "等待提取";
       const fullNameCell = document.createElement("td");
       fullNameCell.dataset.field = "fullName";
-      fullNameCell.contentEditable = result ? "true" : "false";
+      fullNameCell.contentEditable = result && result.status === "已完成" ? "true" : "false";
       fullNameCell.textContent = result ? result.fullName : "—";
       const statusCell = document.createElement("td");
       const status = document.createElement("span");
       status.className = result && result.status === "已完成"
         ? "element-status"
-        : "element-status pending";
+        : result && result.status === "处理中"
+          ? "element-status processing"
+          : "element-status pending";
       status.textContent = result ? result.status : "待处理";
       if (result && result.error) status.title = result.error;
       statusCell.appendChild(status);
       const actionCell = document.createElement("td");
-      if (result && result.status !== "已完成") {
+      if (result && result.status === "待重试") {
         const retryButton = document.createElement("button");
         retryButton.type = "button";
         retryButton.dataset.retryItem = item.id;
@@ -918,18 +1312,32 @@ class ElementExtractionModule {
   /** 生成用于 JSON、Excel 和 CSV 的三列结果。 */
   buildExportRows() {
     const rows = [];
+    const sourceHeader = this.activeMode === "product"
+      ? "模型原始 Listing (B列)"
+      : "提取元素 (B列)";
+    const finalHeader = this.activeMode === "product"
+      ? "最终 Listing (C列)"
+      : "加上前后缀组合结果 (C列)";
+    const fallbackText = this.activeMode === "product"
+      ? "未生成 Listing"
+      : "未识别/图片无显著印花";
     for (let index = 0; index < this.items.length; index += 1) {
       const item = this.items[index];
       const result = this.results.get(item.id);
-      rows.push({
-        "原本编号 (A列)": item.id,
-        "提取元素 (B列)": result ? result.element : "未识别/图片无显著印花",
-        "加上前后缀组合结果 (C列)": result
-          ? result.fullName
-          : this.combineResult("未识别/图片无显著印花")
-      });
+      const row = { "原本编号 (A列)": item.id };
+      row[sourceHeader] = result ? result.element : fallbackText;
+      row[finalHeader] = result ? result.fullName : this.combineResult(fallbackText);
+      rows.push(row);
     }
     return rows;
+  }
+
+  /** 返回与当前提取模式对应的导出基础文件名。 */
+  exportBaseName() {
+    if (this.activeMode === "product") {
+      return `${this.safeFolderName()}_${this.activeProduct}_Listing结果`;
+    }
+    return `${this.safeFolderName()}_提取结果`;
   }
 
   /** 导出兼容原工具结构的 JSON 文件。 */
@@ -939,7 +1347,7 @@ class ElementExtractionModule {
     const blob = new Blob([JSON.stringify(rows, null, 2)], {
       type: "application/json;charset=utf-8"
     });
-    this.downloadBlob(blob, `${this.safeFolderName()}_提取结果.json`);
+    this.downloadBlob(blob, `${this.exportBaseName()}.json`);
     this.appendLog("EXPORT", "JSON 文件已导出");
   }
 
@@ -947,7 +1355,7 @@ class ElementExtractionModule {
   handleExcelClick() {
     this.syncEdits();
     const rows = this.buildExportRows();
-    const baseName = `${this.safeFolderName()}_提取结果`;
+    const baseName = this.exportBaseName();
     if (window.XLSX) {
       const worksheet = window.XLSX.utils.json_to_sheet(rows);
       const workbook = window.XLSX.utils.book_new();
@@ -1002,7 +1410,7 @@ class ElementExtractionModule {
       }
       this.appendLog(
         "EXPORT",
-        `图片文件夹导出完成：${completedItems.length} 张，文件名使用前后缀组合结果`
+        `图片文件夹导出完成：${completedItems.length} 张，文件名使用${this.activeMode === "product" ? "最终 Listing" : "前后缀组合结果"}`
       );
       window.alert(`导出完成，共 ${completedItems.length} 张图片。`);
     } catch (error) {
@@ -1027,7 +1435,10 @@ class ElementExtractionModule {
       String(now.getMinutes()).padStart(2, "0"),
       String(now.getSeconds()).padStart(2, "0")
     ];
-    return `${this.safeFolderName()}_重命名图片_${parts.join("")}`;
+    const modeName = this.activeMode === "product"
+      ? `${this.activeProduct}_Listing图片`
+      : "重命名图片";
+    return `${this.safeFolderName()}_${modeName}_${parts.join("")}`;
   }
 
   /** 将组合结果清理为 Windows 合法文件名，并为重复名称追加序号。 */
@@ -1119,12 +1530,24 @@ class ElementExtractionModule {
   setBusyState(isBusy) {
     this.elements.chooseFolder.disabled = isBusy;
     this.elements.folderInput.disabled = isBusy;
+    this.elements.affixMode.disabled = isBusy;
+    this.elements.productMode.disabled = isBusy;
     this.elements.prefix.disabled = isBusy;
     this.elements.suffix.disabled = isBusy;
+    this.elements.productSelect.disabled = isBusy;
+    this.elements.manageProducts.disabled = isBusy;
     this.elements.concurrency.disabled = isBusy;
     this.elements.thinkingToggle.disabled = isBusy;
     this.elements.run.disabled = isBusy;
-    this.elements.run.textContent = isBusy ? "正在提取…" : "开始提取";
+    if (isBusy) {
+      this.elements.run.textContent = this.activeMode === "product"
+        ? "正在生成 Listing…"
+        : "正在提取…";
+    } else {
+      this.elements.run.textContent = this.activeMode === "product"
+        ? "开始生成 Listing"
+        : "开始提取";
+    }
     this.updateButtons();
   }
 

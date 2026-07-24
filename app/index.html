@@ -99,6 +99,41 @@
 
     .module-view.hidden, .actions.hidden { display: none; }
 
+    .mockup-module {
+      height: calc(100vh - 82px);
+      min-height: 680px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      overflow: hidden;
+      background: var(--panel);
+    }
+
+    .mockup-frame {
+      display: block;
+      width: 100%;
+      height: 100%;
+      border: 0;
+      background: var(--bg);
+    }
+
+    body.mockup-mode { overflow: hidden; }
+
+    body.mockup-mode .app {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    body.mockup-mode .head { flex: 0 0 auto; }
+
+    body.mockup-mode .mockup-module {
+      flex: 1 1 auto;
+      height: auto;
+      min-height: 0;
+    }
+
     .config-line {
       display: flex;
       align-items: center;
@@ -520,6 +555,105 @@
       text-align: center;
     }
 
+    /* 优化模块 1 的提示词、任务表格和滚动区域。 */
+    #patternRedrawModule .prompt-wrap {
+      padding: 14px;
+      border-radius: 8px;
+      background: #171717;
+    }
+
+    #patternRedrawModule .prompt-head {
+      margin-bottom: 10px;
+    }
+
+    #patternRedrawModule .prompt-label {
+      color: #d8dde4;
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    #patternRedrawModule .prompt-tools {
+      gap: 8px;
+    }
+
+    #patternRedrawModule #prompt {
+      height: 138px;
+      min-height: 110px;
+      padding: 12px 14px;
+      border-color: #3a3a3a;
+      border-radius: 7px;
+      font-size: 14px;
+      line-height: 1.55;
+    }
+
+    #patternRedrawModule .table {
+      min-width: 0;
+      overflow-x: auto;
+      border-radius: 8px;
+    }
+
+    #patternRedrawModule .thead,
+    #patternRedrawModule .task-row {
+      min-width: 1396px;
+      grid-template-columns:
+        76px
+        minmax(260px, 1fr)
+        minmax(260px, 1fr)
+        100px
+        280px
+        minmax(320px, 1.2fr)
+        100px;
+    }
+
+    #patternRedrawModule .th,
+    #patternRedrawModule .td {
+      padding: 12px;
+    }
+
+    #patternRedrawModule .task-row {
+      min-height: 300px;
+    }
+
+    #patternRedrawModule .task-prompt {
+      min-height: 190px;
+      max-height: 230px;
+    }
+
+    #patternRedrawModule .stack,
+    #patternRedrawModule .task-log,
+    #patternRedrawModule .error-detail,
+    #patternRedrawModule .error-detail pre {
+      width: 100%;
+      max-width: 100%;
+    }
+
+    #patternRedrawModule,
+    #patternRedrawModule textarea,
+    #patternRedrawModule pre,
+    #patternRedrawModule .table {
+      scrollbar-width: thin;
+      scrollbar-color: #555 #161616;
+    }
+
+    #patternRedrawModule ::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+
+    #patternRedrawModule ::-webkit-scrollbar-track {
+      background: #161616;
+    }
+
+    #patternRedrawModule ::-webkit-scrollbar-thumb {
+      border: 2px solid #161616;
+      border-radius: 999px;
+      background: #555;
+    }
+
+    #patternRedrawModule ::-webkit-scrollbar-thumb:hover {
+      background: #737373;
+    }
+
     #files, #jsonFile, #configFile { display: none; }
 
     .element-layout {
@@ -654,6 +788,30 @@
       height: 34px;
     }
 
+    .element-mode-switch {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+    }
+
+    .element-mode-switch button {
+      height: 34px;
+    }
+
+    .element-mode-switch button.active {
+      border-color: var(--orange);
+      background: rgba(255, 108, 55, 0.12);
+      color: #ff8b61;
+    }
+
+    .element-product-fields.hidden, .element-affix-fields.hidden { display: none; }
+
+    .element-product-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px;
+    }
+
     .element-thinking-toggle[aria-pressed="true"] {
       border-color: var(--orange);
       background: rgba(255, 108, 55, 0.12);
@@ -750,6 +908,11 @@
       color: var(--red);
     }
 
+    .element-status.processing {
+      background: rgba(158, 212, 255, 0.14);
+      color: var(--blue);
+    }
+
     .element-log {
       min-height: 130px;
       max-height: 230px;
@@ -759,6 +922,83 @@
       font: 12px/1.55 Consolas, monospace;
       white-space: pre-wrap;
       word-break: break-word;
+    }
+
+    .element-product-dialog {
+      width: min(760px, calc(100vw - 32px));
+      max-height: calc(100vh - 48px);
+      padding: 0;
+      border: 1px solid #3b3b3b;
+      border-radius: 8px;
+      background: #181818;
+      color: var(--text);
+      box-shadow: 0 18px 60px rgba(0, 0, 0, 0.65);
+    }
+
+    .element-product-dialog::backdrop {
+      background: rgba(0, 0, 0, 0.72);
+    }
+
+    .element-product-dialog-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--line);
+      background: #202020;
+    }
+
+    .element-product-dialog-head h2 {
+      margin: 0;
+      font-size: 16px;
+    }
+
+    .element-product-dialog-body {
+      display: grid;
+      grid-template-columns: 220px minmax(0, 1fr);
+      gap: 14px;
+      padding: 14px;
+    }
+
+    .element-product-list {
+      width: 100%;
+      min-height: 300px;
+      border: 1px solid #3a3a3a;
+      border-radius: 5px;
+      background: #101010;
+      color: var(--text);
+      padding: 6px;
+    }
+
+    .element-product-form {
+      display: grid;
+      align-content: start;
+      gap: 10px;
+    }
+
+    .element-product-prompt {
+      width: 100%;
+      min-height: 230px;
+      resize: vertical;
+      border: 1px solid #3a3a3a;
+      border-radius: 5px;
+      background: #101010;
+      color: var(--text);
+      padding: 10px;
+      outline: none;
+    }
+
+    .element-product-prompt:focus { border-color: var(--orange); }
+
+    .element-product-dialog-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    @media (max-width: 700px) {
+      .element-product-dialog-body { grid-template-columns: 1fr; }
+      .element-product-list { min-height: 120px; }
     }
 
     @media (max-width: 900px) {
@@ -778,6 +1018,7 @@
         <nav class="module-tabs" aria-label="功能模块">
           <button id="patternRedrawTab" class="module-tab active" type="button">印花重绘</button>
           <button id="elementExtractionTab" class="module-tab" type="button">元素提取</button>
+          <button id="mockupTab" class="module-tab" type="button">套图生成</button>
         </nav>
         <div class="config-line">
           <button id="pickConfig">配置文件</button>
@@ -879,17 +1120,36 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
             </div>
           </div>
           <div class="element-panel-body">
-            <div class="element-inline-fields">
-              <div class="element-field">
-                <label for="elementPrefix">前缀</label>
-                <input id="elementPrefix" class="element-input" type="text" placeholder="干发帽-">
-              </div>
-              <div class="element-field">
-                <label for="elementSuffix">后缀</label>
-                <input id="elementSuffix" class="element-input" type="text" placeholder="-女士">
+            <div class="element-field">
+              <label>提取模式</label>
+              <div class="element-mode-switch" role="group" aria-label="元素提取模式">
+                <button id="elementAffixMode" class="active" type="button">前后缀模式</button>
+                <button id="elementProductMode" type="button">Listing 模式</button>
               </div>
             </div>
-            <span class="element-subtitle">提取完成后修改前后缀，失焦时会立即重新组合现有结果</span>
+            <div id="elementAffixFields" class="element-affix-fields">
+              <div class="element-inline-fields">
+                <div class="element-field">
+                  <label for="elementPrefix">前缀</label>
+                  <input id="elementPrefix" class="element-input" type="text" placeholder="干发帽-">
+                </div>
+                <div class="element-field">
+                  <label for="elementSuffix">后缀</label>
+                  <input id="elementSuffix" class="element-input" type="text" placeholder="-女士">
+                </div>
+              </div>
+              <span class="element-subtitle">提取完成后修改前后缀，失焦时会立即重新组合现有结果</span>
+            </div>
+            <div id="elementProductFields" class="element-product-fields hidden">
+              <div class="element-field">
+                <label for="elementProductSelect">Listing 产品</label>
+                <div class="element-product-row">
+                  <select id="elementProductSelect" class="element-select"></select>
+                  <button id="elementManageProducts" type="button">管理产品</button>
+                </div>
+              </div>
+              <span class="element-subtitle">产品和专属 Prompt 来自根目录 config.json</span>
+            </div>
             <div class="element-field">
               <label for="elementConcurrency">并发任务（每批 3×3 / 9 张）</label>
               <select id="elementConcurrency" class="element-select">
@@ -936,7 +1196,7 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
         <div class="element-result-wrap">
           <table class="element-result-table">
             <thead>
-              <tr><th>原本编号</th><th>提取元素</th><th>前后缀组合结果</th><th>状态</th><th>操作</th></tr>
+              <tr><th>原本编号</th><th id="elementSourceColumnHeader">提取元素</th><th id="elementFinalColumnHeader">前后缀组合结果</th><th>状态</th><th>操作</th></tr>
             </thead>
             <tbody id="elementResultsBody">
               <tr><td colspan="5">运行提取任务后，结果会显示在这里。</td></tr>
@@ -950,6 +1210,39 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
         <div class="element-panel-body"><pre id="elementLog" class="element-log">等待开始</pre></div>
       </section>
     </section>
+
+    <section id="mockupModule" class="module-view mockup-module hidden" aria-label="套图生成模块">
+      <iframe id="mockupFrame" class="mockup-frame" src="/mockup" title="套图生成"></iframe>
+    </section>
+
+    <dialog id="elementProductDialog" class="element-product-dialog">
+      <div class="element-product-dialog-head">
+        <h2>管理 Listing 产品</h2>
+        <button id="elementProductDialogClose" type="button">关闭</button>
+      </div>
+      <div class="element-product-dialog-body">
+        <div>
+          <label class="element-subtitle" for="elementProductList">已有产品</label>
+          <select id="elementProductList" class="element-product-list" size="10"></select>
+        </div>
+        <div class="element-product-form">
+          <div class="element-field">
+            <label for="elementProductName">产品名称</label>
+            <input id="elementProductName" class="element-input" type="text" maxlength="100">
+          </div>
+          <div class="element-field">
+            <label for="elementProductPrompt">产品专属 Prompt</label>
+            <textarea id="elementProductPrompt" class="element-product-prompt" maxlength="20000"></textarea>
+          </div>
+          <span class="element-subtitle">货号清单和严格 JSON 输出规范会由系统自动追加。</span>
+          <div class="element-product-dialog-actions">
+            <button id="elementProductNew" type="button">新增</button>
+            <button id="elementProductSave" class="primary" type="button">保存</button>
+            <button id="elementProductDelete" type="button">删除</button>
+          </div>
+        </div>
+      </div>
+    </dialog>
   </main>
 
   <script>

@@ -4,6 +4,34 @@ const path = require("path");
 const ROOT = path.resolve(__dirname, "..");
 const RUNTIME_ROOT = path.join(ROOT, "runtime");
 const CONFIG_PATH = path.join(RUNTIME_ROOT, "config.json");
+const ROOT_CONFIG_PATH = path.join(ROOT, "config.json");
+
+const DEFAULT_PRODUCT_OUTPUT_PROMPT = `需要处理的货号清单如下：
+{item_ids}
+
+输出要求：
+1. 必须为每个货号生成一条结果，不得遗漏或合并货号。
+2. 必须严格输出 JSON 数组，不要包含 Markdown、代码块或额外解释文字。
+3. 每项只允许包含 id 和 description 两个字段。
+
+输出示例：
+[
+  {"id": "WT2231", "description": "完整商品 Listing"}
+]`;
+
+const DEFAULT_MAT_PRODUCT_PROMPT = `你是一个擅长撰写 Temu 或亚马逊平台电商商品标题的营销专家，深谙平台爆款标题的写作技巧。
+你的任务是观察每个货号对应的商品图案，为一款【地垫/浴帘四件套】撰写极具吸引力且符合平台搜索习惯的完整商品 Listing。
+
+商品通用信息：
+- 材质：法兰绒
+- 特点：防滑、可机洗、不褪色、现代家居装饰套装
+- 适用场景：卫生间、浴室、洗衣房、客厅、卧室、厨房
+
+标题要求：
+1. 核心结构包含：2D flat 4pc Set、图案风格、浴帘四件套、防滑地垫、马桶盖套、U 型垫、浴帘及 12 个挂钩。
+2. 根据图片随机融入主要视觉元素、节日主题、适用场景和装饰风格。
+3. 适当使用柔软、舒适、全新、高级、耐用、美观、高品质、新款等修饰词。
+4. 每条标题控制在 100–200 个中文字符。`;
 
 const DEFAULT_ELEMENT_PREFIX_MODEL_PROMPT = `你是一个专业的印花与图案元素分析专家。
 这张拼图由多张商品小图组合而成，每张小图的左上角都有一个形如 [货号] 的醒目标签。
@@ -61,7 +89,13 @@ const DEFAULT_CONFIG = {
     thinkingEnabled: false,
     prefix: "",
     suffix: "",
-    prompt_prefix_model: DEFAULT_ELEMENT_PREFIX_MODEL_PROMPT
+    prompt_prefix_model: DEFAULT_ELEMENT_PREFIX_MODEL_PROMPT,
+    mode: "affix",
+    product_name: "地垫",
+    prompt_product_output_model: DEFAULT_PRODUCT_OUTPUT_PROMPT,
+    product_prompts: {
+      "地垫": DEFAULT_MAT_PRODUCT_PROMPT
+    }
   }
 };
 
@@ -71,6 +105,75 @@ function atomicWriteJson(filePath, value) {
   const tempPath = `${filePath}.${process.pid}.tmp`;
   fs.writeFileSync(tempPath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
   fs.renameSync(tempPath, filePath);
+}
+
+// 读取根目录可提交配置，产品管理只修改其中的 elementExtraction 字段。
+function readRootConfig() {
+  if (!fs.existsSync(ROOT_CONFIG_PATH)) return {};
+  const raw = fs.readFileSync(ROOT_CONFIG_PATH, "utf8");
+  const parsed = JSON.parse(raw);
+  return parsed && typeof parsed === "object" ? parsed : {};
+}
+
+// 清理产品名称和提示词，避免异常配置进入页面或模型请求。
+function normalizeProductPrompts(value) {
+  const source = value && typeof value === "object" ? value : {};
+  const result = {};
+  const names = Object.keys(source);
+  for (let index = 0; index < names.length && index < 100; index += 1) {
+    const name = String(names[index] || "").trim().slice(0, 100);
+    const prompt = String(source[names[index]] || "").trim().slice(0, 20000);
+    if (name && prompt) result[name] = prompt;
+  }
+  return result;
+}
+
+// 从根目录配置返回 Listing 模式、默认产品、公共输出模板和产品提示词。
+function getElementProductSettings() {
+  const rootConfig = readRootConfig();
+  const elementExtraction = rootConfig.elementExtraction || {};
+  const productPrompts = normalizeProductPrompts(elementExtraction.product_prompts);
+  if (!Object.keys(productPrompts).length) {
+    productPrompts["地垫"] = DEFAULT_MAT_PRODUCT_PROMPT;
+  }
+  let productName = String(elementExtraction.product_name || "").trim();
+  if (!productName || !productPrompts[productName]) {
+    productName = Object.keys(productPrompts)[0] || "";
+  }
+  return {
+    mode: elementExtraction.mode === "product" ? "product" : "affix",
+    productName,
+    promptProductOutputModel: String(
+      elementExtraction.prompt_product_output_model || DEFAULT_PRODUCT_OUTPUT_PROMPT
+    ).trim().slice(0, 20000),
+    productPrompts
+  };
+}
+
+// 将产品配置原子写回根目录 config.json，同时保留其他模块和密钥字段。
+function saveElementProductSettings(settings) {
+  const rootConfig = readRootConfig();
+  if (!rootConfig.elementExtraction || typeof rootConfig.elementExtraction !== "object") {
+    rootConfig.elementExtraction = {};
+  }
+  const normalized = {
+    mode: settings.mode === "product" ? "product" : "affix",
+    productName: String(settings.productName || "").trim().slice(0, 100),
+    promptProductOutputModel: String(
+      settings.promptProductOutputModel || DEFAULT_PRODUCT_OUTPUT_PROMPT
+    ).trim().slice(0, 20000),
+    productPrompts: normalizeProductPrompts(settings.productPrompts)
+  };
+  const productNames = Object.keys(normalized.productPrompts);
+  if (!normalized.productName || !normalized.productPrompts[normalized.productName]) {
+    normalized.productName = productNames[0] || "";
+  }
+  rootConfig.elementExtraction.mode = normalized.mode;
+  rootConfig.elementExtraction.product_name = normalized.productName;
+  rootConfig.elementExtraction.prompt_product_output_model = normalized.promptProductOutputModel;
+  rootConfig.elementExtraction.product_prompts = normalized.productPrompts;
+  atomicWriteJson(ROOT_CONFIG_PATH, rootConfig);
+  return normalized;
 }
 
 // 统一接口路径格式，确保代理拼接后的 URL 正确。
@@ -243,6 +346,8 @@ function publicConfig(config = currentConfig) {
   const moonshot = config.shared.moonshot;
   const infringement = config.patternRedraw.infringement;
   const elementExtraction = config.elementExtraction;
+  const productSettings = getElementProductSettings();
+  const productNames = Object.keys(productSettings.productPrompts);
   return {
     ok: true,
     hasKey: Boolean(imageApi.apiKey),
@@ -273,7 +378,10 @@ function publicConfig(config = currentConfig) {
       thinkingEnabled: elementExtraction.thinkingEnabled,
       prefix: elementExtraction.prefix,
       suffix: elementExtraction.suffix,
-      prompt_prefix_model: elementExtraction.prompt_prefix_model
+      prompt_prefix_model: elementExtraction.prompt_prefix_model,
+      mode: productSettings.mode,
+      productName: productSettings.productName,
+      productNames
     },
     modules: {
       patternRedraw: "印花重绘",
@@ -288,8 +396,11 @@ module.exports = {
   ROOT,
   RUNTIME_ROOT,
   CONFIG_PATH,
+  ROOT_CONFIG_PATH,
   getConfig,
+  getElementProductSettings,
   replaceConfig,
+  saveElementProductSettings,
   publicConfig,
   atomicWriteJson
 };

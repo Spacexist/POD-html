@@ -2,7 +2,7 @@
 
 # POD Image Workflow
 
-**Temu 商品采集、印花重绘、Moonshot 元素提取与批量管理的一体化本地工作台**
+**Temu 商品采集、印花重绘、Moonshot 元素提取与套图生成的一体化本地工作台**
 
 [![Node.js 18+](https://img.shields.io/badge/Node.js-18%2B-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
 [![Chrome Extension](https://img.shields.io/badge/Chrome-Extension-4285F4?logo=googlechrome&logoColor=white)](#安装-chrome-扩展)
@@ -17,7 +17,7 @@
 
 ## 项目简介
 
-POD Image Workflow 把 **Temu 图片采集 Chrome 扩展**、**印花重绘** 与 **元素提取** 放在同一个本地工作台中。扩展采集商品后，后台负责去重、缓存原图并通过 SSE 实时通知页面；元素提取模块可独立选择本机图片目录，通过 Moonshot 批量生成可编辑的元素清单。
+POD Image Workflow 把 **Temu 图片采集 Chrome 扩展**、**印花重绘**、**元素提取** 与 **套图生成** 放在同一个本地工作台中。扩展采集商品后，后台负责去重、缓存原图并通过 SSE 实时通知页面；元素提取模块可独立选择本机图片目录，通过 Moonshot 批量生成可编辑的元素清单；套图生成模块在独立画布中把印花批量合成到产品底图。
 
 > 自动导入的任务只会进入 **待生成** 状态。只有手动点击“生成”或“批量生成”才会调用 BeeCode，不会因为采集或刷新页面产生费用。
 
@@ -27,6 +27,7 @@ POD Image Workflow 把 **Temu 图片采集 Chrome 扩展**、**印花重绘** �
 | 原图缓存 | JSON 导入最多 10 并发；502/503/504 或网络超时仅重试一次 |
 | 批量生图 | 默认 3 并发、每次返回 4 张，支持停止、重发和按当前提示词重新生成 |
 | 元素提取 | 每 9 张组成 3×3 标号图，默认 3 并发调用 Moonshot，结果可编辑并导出 |
+| 套图生成 | 单工作区配置印花文件夹与多组底图/Mask，支持位置、缩放、旋转、混合、置换和曲线后导出 ZIP |
 | 状态恢复 | 输入图、生成图、提示词、日志和任务状态全部持久化 |
 | 文件下载 | 使用 `listing` 商品标题命名，只保存图片，不生成 TXT |
 | 联系表 | 当前页 50 张，10×5 排列，审核图由后台保存到 `runtime/test/check/` |
@@ -135,12 +136,18 @@ runtime/config.json
     "thinkingEnabled": false,
     "prefix": "",
     "suffix": "",
+    "mode": "affix",
+    "product_name": "地垫",
+    "prompt_product_output_model": "Listing 模式公共货号与 JSON 输出规范...",
+    "product_prompts": {
+      "地垫": "地垫 Listing 的业务规则..."
+    },
     "prompt_prefix_model": "前后缀模式使用的固定后台提示词..."
   }
 }
 ```
 
-`shared` 放两个模块共用的 Moonshot 与服务配置；`patternRedraw` 对应“印花重绘”；`elementExtraction` 对应“元素提取”。`prompt_prefix_model` 不显示为页面输入框，但会由前端注入当前批次货号后与图片一起发送给本地后台。`n` 控制每次返回数量（1–4），`sizes` 将页面比例直接映射到 `/v1/images/edits` 的 `size`。旧版顶层 `imageApi`、`moonshot`、`infringement`、`server` 和 `beecode` 字段仍可读取；模块 2 的旧 `prompt` 字段会在启动时替换为新的固定模板。
+`shared` 放“印花重绘”和“元素提取”共用的 Moonshot 与服务配置；`patternRedraw` 对应“印花重绘”；`elementExtraction` 对应“元素提取”。“套图生成”当前完全在浏览器内存中运行，不读取或写入配置。`prompt_prefix_model` 不显示为页面输入框，但会由前端注入当前批次货号后与图片一起发送给本地后台。Listing 产品由根目录 `config.json` 中的 `product_prompts` 管理；页面“管理产品”弹窗新增、修改或删除产品时只会原子更新根目录的这些产品字段，API Key 仍由 `runtime/config.json` 管理。`n` 控制每次返回数量（1–4），`sizes` 将页面比例直接映射到 `/v1/images/edits` 的 `size`。旧版顶层 `imageApi`、`moonshot`、`infringement`、`server` 和 `beecode` 字段仍可读取；模块 2 的旧 `prompt` 字段会在启动时替换为新的固定模板。
 
 `runtime/` 已被 Git 整目录忽略。接口和页面只返回脱敏 Key，完整 Key 不会出现在仓库或浏览器响应中。
 
@@ -218,9 +225,12 @@ JSON 导入只缓存原图，不会自动进入付费生图队列。
 - 按文件名自然排序，每 9 张生成一张 3×3 标号图，文件名去除扩展名后作为货号。
 - 批次并发可选 1–4，默认 3；单批失败会标记为可重试，不阻塞其余批次。
 - 请求由后台使用 `shared.moonshot` 配置发起，完整 API Key 不进入浏览器。
-- Moonshot 使用 SSE 逐事件读取；页面不打印逐字增量，只在完成后显示最终 JSON，同时保留 5 秒心跳、30 秒无事件告警和 180 秒请求超时。
+- Moonshot 使用 SSE 逐事件读取；页面不打印逐字增量，只在完成后显示最终 JSON，同时保留 5 秒心跳和 30 秒无事件告警。快速模式请求超时为 180 秒，深度推理模式为 300 秒。
 - “模型模式”按钮可切换“不推理·快速”和“推理·较慢”；默认读取 `elementExtraction.thinkingEnabled`，不推理模式会发送 `thinking: {"type":"disabled"}`。
-- 提示词固定读取后台 `prompt_prefix_model`；提取完成后可修改前缀、后缀并立即重新组合，不会再次请求模型。本阶段不包含 Listing 模式。
+- “前后缀模式”固定读取 `prompt_prefix_model`；提取完成后可修改前缀、后缀并立即重新组合，不会再次请求模型。
+- “Listing 模式”只允许从已配置产品中选择。请求会组合该产品的业务 Prompt 与 `prompt_product_output_model` 公共 JSON 规范；普通使用界面不显示 Prompt。
+- “管理产品”弹窗支持新增、修改和删除 `{名称, Prompt}`，初始产品为“地垫”，配置保存到根目录 `config.json`。
+- 前后缀结果和每个 Listing 产品的结果分别保存在页面内存中，切换模式或产品会恢复各自结果；重新选择图片目录时统一清空。
 - 结果仅保存在当前页面内存，可编辑后导出 JSON 或 Excel；SheetJS 未加载时自动降级为 CSV。
 - “导出图片文件夹”会将已完成原图按前后缀组合结果重命名并写入新目录；重名自动追加序号。
 - 失败结果支持逐行“手动重试”，也可使用侧栏按钮批量重试全部未识别项。
@@ -244,8 +254,10 @@ JSON 导入只缓存原图，不会自动进入付费生图队列。
 
 | 方法 | 路径 | 作用 |
 |---|---|---|
+| `GET` | `/mockup` | 独立套图生成页面 |
 | `GET` | `/api/health` | 健康检查和脱敏配置 |
 | `GET / POST` | `/api/config` | 读取或替换唯一配置 |
+| `GET / POST` | `/api/element-products` | 读取或管理根目录 Listing 产品配置 |
 | `GET` | `/api/tasks` | 恢复全部任务 |
 | `POST` | `/api/intake` | 扩展单条导入 |
 | `POST` | `/api/intake/batch` | JSON 或扩展缓存批量导入 |
@@ -273,8 +285,10 @@ SSE 事件包括：
 ```text
 POD-html/
 ├─ app/
-│  ├─ index.html                         双模块 POD 单页前端
-│  └─ element-extraction.js              元素提取目录、批次、编辑与导出
+│  ├─ index.html                         三模块 POD 单页前端
+│  ├─ element-extraction.js              元素提取目录、批次、编辑与导出
+│  ├─ mockup.html                         独立套图画布与 ZIP 导出
+│  └─ vendor/jszip.min.js                 本地 ZIP 压缩依赖
 ├─ server/
 │  ├─ index.js                           HTTP 路由、BeeCode 代理、缓存接口
 │  ├─ config.js                          唯一配置读取与原子写入

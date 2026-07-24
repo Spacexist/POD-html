@@ -1,0 +1,3050 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>套图生成 · POD 图像工作台</title>
+  <script src="/app/vendor/jszip.min.js"></script>
+  <style>
+    :root {
+      --bg:#080b10; --panel:#151b26; --panel2:#101620; --border:#29364a;
+      --accent:#55d69b; --accent2:#42c98f; --text:#f3fff9; --muted:#8fa0b9;
+      --danger:#ff5568; --warning:#ffbd4a;
+    }
+    * { box-sizing:border-box; margin:0; padding:0; }
+    html,body { width:100%; height:100%; overflow:hidden; }
+    body { background:var(--bg); color:var(--text); font-family:Inter,"Microsoft YaHei",system-ui,sans-serif; }
+    button,input { font:inherit; }
+    button { color:inherit; }
+    header {
+      height:58px; padding:0 28px; display:flex; align-items:center; justify-content:space-between;
+      background:var(--panel); border-bottom:1px solid var(--border); position:relative; z-index:20;
+    }
+    header h1 { font-size:19px; display:flex; align-items:center; gap:9px; }
+    header h1::before { content:""; width:10px; height:10px; border-radius:50%; background:var(--accent); }
+    .back { color:var(--accent); text-decoration:none; font-size:14px; font-weight:700; }
+    main { height:calc(100% - 58px); display:flex; }
+    .sidebar {
+      width:310px; flex:0 0 310px; padding:20px; background:var(--panel);
+      border-right:1px solid var(--border); overflow:auto; position:relative; z-index:12;
+    }
+    .side-section { margin-bottom:20px; }
+    .side-title { color:#96baf0; font-size:13px; margin-bottom:10px; }
+    .card { padding:16px; border:1px solid var(--border); border-radius:9px; background:rgba(255,255,255,.018); }
+    .card p { color:var(--muted); font-size:12px; line-height:1.65; }
+    .factory-template {
+      margin-bottom:12px; padding:13px; border:2px dashed #4b6881; border-radius:12px;
+      background:#101722; cursor:grab; transition:.18s ease; user-select:none;
+    }
+    .factory-template:hover {
+      border-color:var(--accent); background:rgba(54,221,168,.055);
+      box-shadow:0 0 0 4px rgba(54,221,168,.08); transform:translateY(-2px);
+    }
+    .factory-template:active { cursor:grabbing; transform:scale(.985); }
+    .template-title { display:flex; align-items:center; justify-content:space-between; font-weight:800; font-size:14px; }
+    .template-title b { color:var(--accent); font-size:20px; }
+    .template-layout { display:grid; grid-template-columns:34% 1fr; gap:7px; height:68px; margin:10px 0; }
+    .template-layout i { display:block; border:1px solid #34445a; border-radius:6px; background:#090e16; }
+    .template-layout i:last-child { border-style:dashed; }
+    .template-tip { color:var(--muted); font-size:11px; text-align:center; }
+    .btn {
+      width:100%; min-height:43px; border:0; border-radius:7px; padding:10px 12px; cursor:pointer;
+      background:var(--accent); color:#07110d; font-weight:800; transition:.16s ease;
+    }
+    .btn:hover { background:var(--accent2); transform:translateY(-1px); }
+    .btn:active { transform:scale(.985); }
+    .btn.secondary { color:var(--text); background:transparent; border:1px solid var(--border); }
+    .btn.secondary:hover { background:rgba(255,255,255,.05); }
+    .btn + .btn { margin-top:8px; }
+    .summary { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:12px; }
+    .summary div { padding:10px; border-radius:7px; background:#0d121b; border:1px solid #222e40; }
+    .summary b { display:block; color:var(--accent); font-size:18px; }
+    .summary span { font-size:11px; color:var(--muted); }
+    #viewport { flex:1; position:relative; overflow:hidden; background:#070a0f; user-select:none; }
+    #viewport.factory-drag-over::after {
+      content:"松开以创建工作区"; position:absolute; inset:24px; z-index:7; pointer-events:none;
+      display:grid; place-items:center; border:2px dashed var(--accent); border-radius:18px;
+      color:var(--accent); background:rgba(54,221,168,.045); font-size:18px; font-weight:800;
+    }
+    #dot-grid {
+      position:absolute; inset:0; width:100%; height:100%; pointer-events:none;
+    }
+    #world { position:absolute; left:0; top:0; width:1px; height:1px; transform-origin:0 0; }
+    #empty-hint {
+      position:absolute; left:100px; top:100px; width:720px; height:330px; display:grid; place-items:center;
+      border:2px dashed #314058; border-radius:22px; color:#617189; background:rgba(16,22,32,.38);
+      text-align:center; font-size:18px; line-height:1.8;
+    }
+    #empty-hint b { display:block; color:var(--accent); font-size:25px; }
+    .factory {
+      position:absolute; width:1510px; min-height:610px; padding:16px;
+      border:2px dashed #4b6881; border-radius:18px; background:rgba(16,22,32,.96);
+      box-shadow:0 18px 60px rgba(0,0,0,.32);
+      transition:border-color .18s,box-shadow .18s,filter .18s;
+    }
+    .factory.entering { animation:factoryIn .2s cubic-bezier(.2,.8,.2,1); }
+    @keyframes factoryIn { from{transform:scale(.96);opacity:.55;filter:brightness(1.35)} to{transform:scale(1);opacity:1;filter:none} }
+    .factory.drop-ready {
+      border-color:var(--accent); box-shadow:0 0 0 7px rgba(54,221,168,.09),0 18px 60px rgba(0,0,0,.34);
+      filter:brightness(1.04);
+    }
+    .factory-head {
+      height:48px; display:flex; align-items:center; justify-content:space-between; gap:14px;
+      padding:0 2px 14px; border-bottom:1px solid rgba(64,82,108,.42); margin-bottom:16px;
+    }
+    .factory-title-wrap { display:flex; align-items:center; gap:10px; min-width:0; }
+    .factory-handle {
+      width:34px; height:32px; display:grid; place-items:center; border:1px solid var(--border);
+      border-radius:7px; color:#8192aa; cursor:grab; background:#121a26; font-size:18px;
+    }
+    .factory-handle:active { cursor:grabbing; }
+    .factory-title { min-width:0; }
+    .factory-title h2 { font-size:17px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .factory-title p { color:var(--muted); font-size:10px; margin-top:3px; }
+    .factory-actions { display:flex; align-items:center; gap:8px; }
+    .badge { color:var(--muted); border:1px solid var(--border); border-radius:99px; padding:5px 9px; font-size:10px; }
+    .mini-btn {
+      border:1px solid var(--border); border-radius:7px; background:#182130; padding:8px 11px; cursor:pointer;
+      font-size:11px; font-weight:700; white-space:nowrap;
+    }
+    .mini-btn:hover { border-color:#526985; background:#202b3d; }
+    .mini-btn.primary { background:var(--accent); color:#07110d; border-color:var(--accent); }
+    .mini-btn.primary:hover { background:var(--accent2); }
+    .mini-btn.danger:hover { color:#ffdce1; border-color:var(--danger); background:rgba(255,85,104,.1); }
+    .mini-btn:disabled { opacity:.4; cursor:not-allowed; }
+    .factory-body { display:grid; grid-template-columns:500px 1fr; gap:18px; align-items:start; }
+    .preview-panel {
+      width:500px; padding:11px; border:1px solid var(--border); border-radius:13px; background:#0d131d;
+    }
+    .preview-head { height:34px; display:flex; align-items:center; justify-content:space-between; gap:8px; }
+    .preview-head h3 { font-size:12px; }
+    .preview-head span { max-width:260px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .factory-preview {
+      display:block; width:476px; height:476px; border-radius:9px; background:#080c12;
+      box-shadow:inset 0 0 0 1px #202b3c; cursor:default;
+    }
+    .factory-adjustments {
+      width:min(620px,calc(100% - 222px)); margin:12px 0 0 222px; padding:10px;
+      border:1px solid var(--border); border-radius:10px; background:#101720;
+    }
+    .factory-adjustments.no-template { opacity:.55; }
+    .factory-adjustments.no-template .factory-curve { pointer-events:none; }
+    .adjustment-heading,
+    .adjustment-line {
+      display:flex; align-items:center; justify-content:space-between; gap:10px;
+    }
+    .adjustment-heading { margin-bottom:9px; }
+    .adjustment-heading strong { font-size:11px; }
+    .adjustment-heading span,
+    .adjustment-line span { color:var(--muted); font-size:9px; }
+    .blend-segments { display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-bottom:9px; }
+    .blend-segment {
+      height:30px; border:1px solid var(--border); border-radius:7px; background:#171f2b;
+      color:var(--muted); cursor:pointer; font-size:10px; font-weight:700;
+    }
+    .blend-segment:hover { color:var(--text); border-color:#526985; }
+    .blend-segment.active {
+      color:#07110d; border-color:var(--accent); background:var(--accent);
+    }
+    .displacement-controls {
+      display:grid; grid-template-columns:auto minmax(0,1fr) 36px; gap:7px 9px;
+      align-items:center; padding:9px 0; border-top:1px solid var(--border);
+      border-bottom:1px solid var(--border);
+    }
+    .displacement-controls label { color:#c9d0da; font-size:9px; }
+    .displacement-controls input[type="range"] { width:100%; accent-color:var(--accent); }
+    .displacement-controls output { color:var(--accent); font-size:9px; text-align:right; }
+    .displacement-switch { display:flex; align-items:center; gap:6px; cursor:pointer; }
+    .displacement-switch input { accent-color:var(--accent); }
+    .factory-curve-wrap { margin-top:9px; }
+    .factory-curve {
+      display:block; width:100%; height:180px; margin-top:7px; border:1px solid var(--border);
+      border-radius:8px; background:#0c121a; cursor:crosshair; touch-action:none;
+    }
+    .curve-caption {
+      display:flex; justify-content:space-between; gap:8px; margin-top:5px;
+      color:var(--muted); font-size:8px;
+    }
+    .scheme-panel {
+      min-width:0; min-height:526px; padding:12px; border:1px solid #26374b; border-radius:13px; background:#0d141e;
+    }
+    .scheme-caption { display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; }
+    .scheme-caption h3 { font-size:13px; }
+    .scheme-caption p { color:var(--muted); font-size:10px; }
+    .scheme-flow { display:flex; align-items:flex-start; gap:13px; min-height:0; }
+    .pattern-node {
+      flex:0 0 176px; min-height:0; border:1px solid #3f526c; border-radius:11px; padding:10px;
+      background:#121a26; cursor:pointer; transition:.16s;
+    }
+    .pattern-node:hover { border-color:var(--accent); }
+    .node-label { display:flex; align-items:center; justify-content:space-between; font-size:12px; font-weight:800; margin-bottom:8px; }
+    .node-label span:last-child { color:var(--accent); font-size:10px; }
+    .folder-empty {
+      height:150px; display:grid; place-items:center; text-align:center; color:var(--muted);
+      border:1px dashed #34445b; border-radius:9px; font-size:11px; line-height:1.6; padding:10px;
+    }
+    .folder-name { color:var(--text); font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-bottom:7px; }
+    .pattern-count { color:var(--muted); font-size:9px; margin-bottom:7px; }
+    .pattern-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:6px; max-height:260px; overflow:auto; padding:1px; }
+    .pattern-thumb {
+      aspect-ratio:1; border:1px solid #334157; border-radius:6px; overflow:hidden; background:#080c12; cursor:pointer;
+    }
+    .pattern-thumb.active { border-color:var(--accent); box-shadow:0 0 0 2px rgba(54,221,168,.24); }
+    .pattern-thumb img,.slot img,.loose-item img { width:100%; height:100%; object-fit:contain; pointer-events:none; }
+    .flow-arrow { align-self:center; color:#58718e; font-size:23px; }
+    .pairs-wrap { flex:1; min-width:0; }
+    .pairs-zone {
+      display:flex; align-items:flex-start; flex-wrap:wrap; gap:10px; min-height:420px; padding:2px;
+      border-radius:10px; transition:.16s;
+    }
+    .pairs-zone.drop-ready { background:rgba(54,221,168,.045); box-shadow:inset 0 0 0 1px rgba(54,221,168,.5); }
+    .pair-card {
+      width:145px; padding:8px; border:1px solid #35445b; border-radius:10px; background:#111925;
+      transition:border-color .16s,transform .18s cubic-bezier(.2,.8,.2,1),box-shadow .18s;
+      animation:snapIn .18s cubic-bezier(.2,.8,.2,1); cursor:pointer;
+    }
+    @keyframes snapIn { from{transform:scale(.94);opacity:.7} to{transform:scale(1);opacity:1} }
+    .pair-card:hover,.pair-card.active { border-color:var(--accent); }
+    .pair-card.active { box-shadow:0 0 0 2px rgba(54,221,168,.15); }
+    .pair-card.invalid { border-color:var(--danger); box-shadow:0 0 0 2px rgba(255,85,104,.1); }
+    .pair-card.drop-target,.slot.drop-target { border-color:var(--accent); box-shadow:0 0 0 4px rgba(54,221,168,.15); }
+    .pair-head { display:flex; align-items:center; justify-content:space-between; height:22px; margin-bottom:6px; }
+    .pair-index { max-width:108px; color:var(--muted); font-size:10px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .delete-pair { border:0; background:transparent; color:#718199; cursor:pointer; padding:2px 4px; font-size:14px; }
+    .delete-pair:hover { color:var(--danger); }
+    .slot {
+      height:150px; border:1px dashed #3a4a62; border-radius:7px; background:#090e16; overflow:hidden;
+      position:relative; display:flex; align-items:center; justify-content:center; cursor:pointer; transition:.16s;
+    }
+    .slot + .slot { margin-top:7px; }
+    .slot:hover { border-color:var(--accent); }
+    .slot.has-file { border-style:solid; }
+    .slot-label {
+      position:absolute; left:4px; bottom:4px; padding:2px 5px; border-radius:4px;
+      background:rgba(4,8,13,.82); color:#b9c8db; font-size:9px; pointer-events:none;
+    }
+    .slot-empty { color:#708099; text-align:center; font-size:10px; line-height:1.55; padding:7px; pointer-events:none; }
+    .pair-error { min-height:27px; padding-top:5px; color:var(--danger); font-size:8px; line-height:1.35; }
+    .pair-effect-summary {
+      margin-top:5px; padding-top:5px; border-top:1px solid var(--border);
+      color:var(--accent); font-size:8px; line-height:1.35;
+    }
+    .add-pair {
+      width:76px; height:400px; border:1px dashed #40536d; border-radius:10px; background:rgba(255,255,255,.015);
+      color:#66809f; cursor:pointer; font-size:32px; transition:.16s;
+    }
+    .add-pair:hover { color:var(--accent); border-color:var(--accent); background:rgba(54,221,168,.05); }
+    .loose-item {
+      position:absolute; width:180px; padding:9px; border:1px solid #4a5c75; border-radius:11px;
+      background:#111925; box-shadow:0 14px 35px rgba(0,0,0,.36); cursor:grab;
+    }
+    .loose-item.selected { border-color:var(--accent); box-shadow:0 0 0 3px rgba(54,221,168,.17),0 14px 35px rgba(0,0,0,.36); }
+    .loose-item:active { cursor:grabbing; }
+    .loose-head { display:flex; justify-content:space-between; color:var(--muted); font-size:10px; margin-bottom:6px; }
+    .loose-thumbs { display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+    .loose-thumb {
+      height:96px; border-radius:7px; background:#080d14; border:1px solid #2c394d; overflow:hidden;
+      display:grid; place-items:center; color:#63748d; font-size:10px;
+    }
+    .loose-item.mask-only { width:126px; }
+    .loose-item.mask-only .loose-thumbs { grid-template-columns:1fr; }
+    .viewport-tips {
+      position:absolute; left:24px; bottom:18px; z-index:8; display:flex; gap:17px; pointer-events:none;
+      border:1px solid var(--border); border-radius:99px; padding:9px 15px; background:rgba(13,18,27,.9);
+      color:var(--muted); font-size:11px;
+    }
+    .viewport-tips b { color:var(--accent); }
+    .zoom-indicator {
+      position:absolute; right:18px; bottom:18px; z-index:8; padding:8px 12px; border-radius:8px;
+      background:rgba(13,18,27,.9); border:1px solid var(--border); color:var(--muted); font-size:11px;
+    }
+    input[type=file] { display:none; }
+    .toast {
+      position:fixed; left:50%; top:76px; z-index:2000; transform:translate(-50%,-12px); opacity:0;
+      min-width:260px; max-width:600px; padding:11px 16px; border:1px solid var(--border); border-radius:9px;
+      background:#17202e; color:var(--text); text-align:center; font-size:13px; pointer-events:none; transition:.2s;
+    }
+    .toast.show { opacity:1; transform:translate(-50%,0); }
+    .toast.error { border-color:var(--danger); color:#ffdce1; }
+    .progress { position:fixed; inset:0; z-index:1000; display:none; place-items:center; background:rgba(3,5,8,.84); }
+    .progress.show { display:grid; }
+    .progress-box { width:500px; padding:25px; border-radius:15px; background:var(--panel); border:1px solid var(--border); }
+    .progress-box h3 { text-align:center; margin-bottom:18px; }
+    .bar { height:11px; border-radius:99px; overflow:hidden; background:#273245; }
+    .bar i { display:block; width:0; height:100%; background:var(--accent); transition:width .16s; }
+    .progress-line { display:flex; justify-content:space-between; color:var(--muted); font-size:12px; margin-top:10px; }
+    .log { height:110px; overflow:auto; margin-top:14px; padding:10px; border-radius:7px; background:#090e15; color:#9fd9c4; font:11px/1.55 monospace; }
+
+    /* Codex-inspired neutral desktop theme */
+    :root {
+      --bg:#0d0d0d; --panel:#151515; --panel2:#1a1a1a; --border:#2d2d2d;
+      --accent:#e8e8e8; --accent2:#ffffff; --text:#ececec; --muted:#929292;
+      --danger:#ef6a74; --warning:#d7a94d; --success:#55c98c;
+    }
+    body {
+      background:var(--bg); color:var(--text);
+      font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",system-ui,sans-serif;
+      letter-spacing:.005em;
+    }
+    header {
+      height:50px; padding:0 16px; background:#121212; border-color:#292929;
+      box-shadow:0 1px 0 rgba(255,255,255,.015);
+    }
+    header h1 { gap:9px; font-size:14px; font-weight:600; color:#ededed; }
+    header h1::before {
+      width:23px; height:23px; border-radius:6px; background:#1d1d1d;
+      border:1px solid #393939; box-shadow:inset 0 0 0 5px #161616;
+    }
+    header h1 small {
+      padding-left:10px; border-left:1px solid #343434; color:#858585;
+      font-size:12px; font-weight:500;
+    }
+    .back {
+      padding:6px 10px; border:1px solid #303030; border-radius:7px;
+      color:#b8b8b8; background:#191919; font-size:12px; font-weight:550;
+    }
+    .back:hover { color:#fff; border-color:#454545; background:#202020; }
+    main { height:calc(100% - 50px); }
+    .sidebar {
+      width:288px; flex-basis:288px; padding:14px 12px; background:#141414;
+      border-color:#2a2a2a; scrollbar-color:#3a3a3a transparent;
+    }
+    .side-section { margin-bottom:18px; }
+    .side-title {
+      margin:0 6px 8px; color:#777; font-size:11px; font-weight:600;
+      letter-spacing:.04em;
+    }
+    .card {
+      padding:12px; border:1px solid #2c2c2c; border-radius:10px;
+      background:#181818; box-shadow:0 1px 0 rgba(255,255,255,.015);
+    }
+    .card p { color:#8c8c8c; font-size:11px; line-height:1.65; }
+    .factory-template {
+      padding:12px; margin-bottom:11px; border:1px solid #383838; border-radius:9px;
+      background:#1b1b1b; box-shadow:none;
+    }
+    .factory-template:hover {
+      border-color:#626262; background:#202020; box-shadow:0 0 0 3px rgba(255,255,255,.035);
+      transform:translateY(-1px);
+    }
+    .template-title { font-size:13px; font-weight:600; }
+    .template-title b { color:#d8d8d8; font-size:18px; font-weight:400; }
+    .template-layout { height:58px; margin:9px 0; gap:6px; }
+    .template-layout i { border-color:#353535; border-radius:5px; background:#121212; }
+    .template-layout i:last-child { border-color:#444; }
+    .template-tip { color:#858585; font-size:10px; }
+    .btn {
+      min-height:38px; border-radius:8px; padding:8px 11px;
+      background:#ededed; color:#151515; font-size:12px; font-weight:650;
+      box-shadow:0 1px 0 rgba(255,255,255,.25);
+    }
+    .btn:hover { background:#fff; transform:none; }
+    .btn:active { transform:scale(.985); background:#dedede; }
+    .btn.secondary {
+      color:#cfcfcf; background:#1b1b1b; border:1px solid #343434; box-shadow:none;
+    }
+    .btn.secondary:hover { color:#fff; background:#232323; border-color:#454545; }
+    .summary { gap:7px; margin-top:10px; }
+    .summary div { padding:9px; border-color:#2d2d2d; border-radius:8px; background:#171717; }
+    .summary b { color:var(--success); font-size:16px; font-weight:650; }
+    .summary span { color:#7f7f7f; font-size:10px; }
+    #viewport { background:#0d0d0d; }
+    #viewport.factory-drag-over::after {
+      inset:18px; border-color:#777; border-radius:14px; color:#ddd;
+      background:rgba(255,255,255,.025); font-size:15px; font-weight:600;
+    }
+    #empty-hint {
+      border:1px dashed #343434; border-radius:14px; color:#777; background:rgba(19,19,19,.74);
+      font-size:14px; line-height:1.75;
+    }
+    #empty-hint b { color:#d8d8d8; font-size:18px; font-weight:600; }
+    .factory {
+      padding:12px; border:1px dashed #414141; border-radius:13px; background:rgba(20,20,20,.975);
+      box-shadow:0 16px 48px rgba(0,0,0,.36),0 1px 0 rgba(255,255,255,.02);
+    }
+    .factory.drop-ready {
+      border-color:#8b8b8b; box-shadow:0 0 0 5px rgba(255,255,255,.045),0 16px 48px rgba(0,0,0,.4);
+      filter:brightness(1.04);
+    }
+    .factory-head {
+      height:44px; padding:0 1px 11px; margin-bottom:12px; border-color:#292929;
+    }
+    .factory-title-wrap { gap:8px; }
+    .factory-handle {
+      width:29px; height:29px; border-color:#333; border-radius:7px;
+      color:#777; background:#1b1b1b; font-size:15px;
+    }
+    .factory-handle:hover { color:#c9c9c9; border-color:#4a4a4a; background:#222; }
+    .factory-title h2 { color:#e6e6e6; font-size:13px; font-weight:600; }
+    .factory-title p { color:#717171; font-size:9px; }
+    .factory-actions { gap:6px; }
+    .badge {
+      color:#929292; border-color:#303030; border-radius:7px; padding:5px 8px;
+      background:#181818; font-size:9px;
+    }
+    .mini-btn {
+      padding:7px 10px; border-color:#343434; border-radius:7px;
+      color:#bebebe; background:#1c1c1c; font-size:10px; font-weight:600;
+    }
+    .mini-btn:hover { color:#f1f1f1; border-color:#484848; background:#242424; }
+    .mini-btn.primary { color:#171717; background:#e9e9e9; border-color:#e9e9e9; }
+    .mini-btn.primary:hover { color:#111; background:#fff; border-color:#fff; }
+    .mini-btn.danger:hover { color:#ffb5bc; border-color:#82444a; background:#2b1b1d; }
+    .factory-body { gap:12px; }
+    .preview-panel {
+      padding:9px; border-color:#292929; border-radius:10px; background:#111;
+    }
+    .preview-head { height:31px; }
+    .preview-head h3 { color:#bdbdbd; font-size:10px; font-weight:600; }
+    .factory-preview {
+      border-radius:7px; background:#0b0b0b; box-shadow:inset 0 0 0 1px #252525;
+    }
+    .factory-adjustments { border-color:#292929; background:#141414; }
+    .blend-segment { border-color:#343434; color:#8e8e8e; background:#1c1c1c; }
+    .blend-segment:hover { color:#efefef; border-color:#4a4a4a; }
+    .blend-segment.active { color:#111; border-color:#e9e9e9; background:#e9e9e9; }
+    .displacement-controls { border-color:#292929; }
+    .displacement-controls label { color:#bdbdbd; }
+    .factory-curve { border-color:#292929; background:#101010; }
+    .scheme-panel {
+      padding:10px; border-color:#292929; border-radius:10px; background:#111;
+    }
+    .scheme-caption { margin-bottom:8px; }
+    .scheme-caption h3 { color:#bdbdbd; font-size:10px; font-weight:600; }
+    .scheme-caption p { color:#6f6f6f; font-size:9px; }
+    .pattern-node {
+      border-color:#333; border-radius:9px; background:#181818;
+    }
+    .pattern-node:hover { border-color:#575757; }
+    .node-label { color:#d1d1d1; font-size:10px; font-weight:600; }
+    .node-label span:last-child { color:#9d9d9d; }
+    .folder-empty { color:#737373; border-color:#383838; border-radius:7px; font-size:10px; }
+    .folder-name { color:#d5d5d5; }
+    .pattern-count { color:#767676; }
+    .pattern-thumb { border-color:#303030; border-radius:5px; background:#0d0d0d; }
+    .pattern-thumb.active { border-color:#cfcfcf; box-shadow:0 0 0 2px rgba(255,255,255,.08); }
+    .flow-arrow { color:#555; }
+    .pairs-zone.drop-ready { background:rgba(255,255,255,.025); box-shadow:inset 0 0 0 1px #555; }
+    .pair-card { border-color:#313131; border-radius:8px; background:#181818; }
+    .pair-effect-summary { border-color:#292929; color:#a8a8a8; }
+    .pair-card:hover,.pair-card.active { border-color:#696969; }
+    .pair-card.active { box-shadow:0 0 0 2px rgba(255,255,255,.055); }
+    .pair-card.invalid { border-color:#7d3e44; box-shadow:0 0 0 2px rgba(239,106,116,.06); }
+    .pair-card.drop-target,.slot.drop-target { border-color:#aaa; box-shadow:0 0 0 3px rgba(255,255,255,.07); }
+    .pair-index { color:#868686; }
+    .delete-pair { color:#666; }
+    .slot { border-color:#383838; border-radius:6px; background:#0e0e0e; }
+    .slot:hover { border-color:#666; }
+    .slot-label { background:rgba(10,10,10,.84); color:#aaa; }
+    .slot-empty { color:#686868; }
+    .add-pair { border-color:#3c3c3c; border-radius:8px; color:#6f6f6f; background:#151515; }
+    .add-pair:hover { color:#ddd; border-color:#686868; background:#1c1c1c; }
+    .loose-item { border-color:#3a3a3a; border-radius:9px; background:#191919; }
+    .loose-item.selected { border-color:#8a8a8a; box-shadow:0 0 0 3px rgba(255,255,255,.055),0 14px 35px rgba(0,0,0,.36); }
+    .loose-head { color:#858585; }
+    .loose-thumb { border-color:#303030; background:#101010; color:#6c6c6c; }
+    .viewport-tips {
+      left:18px; bottom:14px; gap:14px; padding:7px 11px; border-color:#303030;
+      border-radius:8px; background:rgba(20,20,20,.92); color:#777; font-size:10px;
+      box-shadow:0 5px 22px rgba(0,0,0,.25);
+    }
+    .viewport-tips b { color:#c8c8c8; font-weight:600; }
+    .zoom-indicator {
+      right:14px; bottom:14px; padding:7px 10px; border-color:#303030; border-radius:7px;
+      background:rgba(20,20,20,.92); color:#929292; font-size:10px;
+    }
+    .toast {
+      top:65px; border-color:#3a3a3a; border-radius:8px; background:#222; color:#e5e5e5;
+      box-shadow:0 12px 35px rgba(0,0,0,.42);
+    }
+    .toast.error { border-color:#784047; color:#ffbec4; }
+    .progress { background:rgba(8,8,8,.88); }
+    .progress-box { border-color:#333; border-radius:12px; background:#181818; }
+    .bar { background:#303030; }
+    .bar i { background:#ddd; }
+    .progress-line { color:#888; }
+    .log { background:#101010; color:#9ec9b2; }
+    * { scrollbar-width:thin; scrollbar-color:#3b3b3b transparent; }
+    *::-webkit-scrollbar { width:8px; height:8px; }
+    *::-webkit-scrollbar-thumb { background:#3a3a3a; border:2px solid transparent; border-radius:99px; background-clip:padding-box; }
+    *::-webkit-scrollbar-track { background:transparent; }
+
+    body.fixed-workspace #viewport { overflow:auto; user-select:auto; }
+    body.fixed-workspace #dot-grid,
+    body.fixed-workspace .viewport-tips,
+    body.fixed-workspace .zoom-indicator,
+    body.fixed-workspace .canvas-control-section,
+    body.fixed-workspace #loose-layer { display:none; }
+    body.fixed-workspace #world {
+      position:relative; left:auto; top:auto; width:100%; min-width:0; height:auto; min-height:100%;
+      padding:18px; transform:none !important;
+    }
+    body.fixed-workspace #factories-layer {
+      position:relative; display:flex; flex-direction:column; align-items:stretch; gap:18px; width:100%;
+    }
+    body.fixed-workspace .factory {
+      position:relative; left:auto !important; top:auto !important; width:100%;
+    }
+    body.fixed-workspace .factory-handle { cursor:default; }
+    body.fixed-workspace #empty-hint {
+      position:relative; left:auto; top:auto; width:100%; height:280px;
+    }
+    body.single-factory .sidebar,
+    body.single-factory .factory-handle,
+    body.single-factory .delete-factory { display:none; }
+
+    /* 单 Factory 预览主导布局 */
+    body.single-factory header {
+      height:52px; padding:0 18px; background:#101111; border-color:#292b2b;
+    }
+    body.single-factory header h1 { font-size:15px; }
+    body.single-factory header h1 small { color:#777; font-size:11px; font-weight:500; }
+    body.single-factory main { height:calc(100% - 52px); }
+    body.single-factory #viewport { background:#0d0e0e; }
+    body.single-factory #world { padding:16px; }
+    body.single-factory .factory {
+      min-height:0; padding:0; border:0; border-radius:0; background:transparent; box-shadow:none;
+    }
+    body.single-factory .factory-head {
+      height:44px; margin:0 0 10px; padding:0; border:0;
+    }
+    body.single-factory .factory-title-wrap { display:none; }
+    body.single-factory .factory-actions { width:100%; justify-content:flex-end; }
+    body.single-factory .apply-factory { display:none; }
+    body.single-factory .factory-body {
+      display:grid; grid-template-columns:minmax(420px,38%) minmax(0,1fr); gap:12px; align-items:stretch;
+    }
+    body.single-factory .preview-panel {
+      position:sticky; top:0; width:auto; max-width:none; padding:12px;
+      border:1px solid #292b2b; border-radius:10px; background:#131414;
+    }
+    body.single-factory .preview-head { height:34px; }
+    body.single-factory .preview-head h3,
+    body.single-factory .scheme-caption h3 { color:#d7dada; font-size:11px; }
+    body.single-factory .factory-preview {
+      width:100%; height:auto; aspect-ratio:1; border-radius:8px; background:#090b0d;
+      box-shadow:inset 0 0 0 1px #262929;
+    }
+    body.single-factory .transform-panel {
+      margin-top:10px; padding:11px; border:1px solid #292b2b; border-radius:9px; background:#171818;
+    }
+    body.single-factory .transform-heading,
+    body.single-factory .section-heading {
+      display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:10px;
+    }
+    body.single-factory .transform-heading strong,
+    body.single-factory .section-heading strong { color:#d9dddd; font-size:11px; }
+    body.single-factory .transform-heading span,
+    body.single-factory .section-heading span { color:#707575; font-size:9px; }
+    body.single-factory .transform-row {
+      display:grid; grid-template-columns:62px minmax(0,1fr) 46px; align-items:center; gap:10px; min-height:29px;
+    }
+    body.single-factory .transform-row label { color:#aeb3b3; font-size:9px; }
+    body.single-factory .transform-row input { width:100%; accent-color:#55d69b; }
+    body.single-factory .transform-row output {
+      color:#d9dddd; font-size:9px; text-align:right; font-variant-numeric:tabular-nums;
+    }
+    body.single-factory .scheme-panel {
+      display:flex; flex-direction:column; min-height:0; height:100%;
+      padding:0; border:0; border-radius:0; background:transparent;
+    }
+    body.single-factory .scheme-caption { display:none; }
+    body.single-factory .scheme-flow { display:block; min-height:0; }
+    body.single-factory .flow-arrow { display:none; }
+    body.single-factory .pattern-node {
+      display:grid; grid-template-columns:auto 1fr; gap:6px 12px; width:100%; min-height:0;
+      padding:12px; border:1px solid #292b2b; border-radius:10px; background:#131414;
+    }
+    body.single-factory .node-label { grid-column:1/-1; height:26px; margin:0; }
+    body.single-factory .node-label span:first-child { color:#d9dddd; font-size:11px; }
+    body.single-factory .node-label span:last-child {
+      padding:6px 10px; border:1px solid #343737; border-radius:7px;
+      color:#c4c8c8; background:#1b1d1d; font-size:9px;
+    }
+    body.single-factory .folder-empty {
+      grid-column:1/-1; height:94px; border-color:#363939; background:#111212; font-size:10px;
+    }
+    body.single-factory .folder-name {
+      grid-column:1; margin:0; align-self:center; color:#d2d5d5; font-size:10px;
+    }
+    body.single-factory .pattern-count {
+      grid-column:2; margin:0; align-self:center; text-align:right; color:#747878; font-size:9px;
+    }
+    body.single-factory .pattern-grid {
+      grid-column:1/-1; display:flex; gap:8px; max-height:none; overflow-x:auto; overflow-y:hidden; padding:2px 1px 7px;
+    }
+    body.single-factory .pattern-thumb {
+      flex:0 0 84px; width:84px; aspect-ratio:1; border-color:#303333; border-radius:7px; background:#0d0e0e;
+    }
+    body.single-factory .pattern-thumb.active {
+      border-color:#55d69b; box-shadow:0 0 0 2px rgba(85,214,155,.12);
+    }
+    body.single-factory .pairs-wrap {
+      width:100%; margin-top:12px; padding:12px; border:1px solid #292b2b; border-radius:10px; background:#131414;
+    }
+    body.single-factory .pairs-zone {
+      display:flex; align-items:stretch; flex-wrap:wrap; gap:9px; min-height:0; padding:0;
+    }
+    body.single-factory .pair-card {
+      display:grid; grid-template-columns:1fr 1fr; gap:7px; width:250px; padding:8px;
+      border:1px solid #303333; border-radius:8px; background:#181919;
+    }
+    body.single-factory .pair-card:hover,
+    body.single-factory .pair-card.active { border-color:#55d69b; }
+    body.single-factory .pair-card.active { box-shadow:0 0 0 2px rgba(85,214,155,.1); }
+    body.single-factory .pair-head,
+    body.single-factory .pair-error,
+    body.single-factory .pair-effect-summary { grid-column:1/-1; }
+    body.single-factory .pair-head { height:20px; margin:0; }
+    body.single-factory .pair-index { max-width:205px; color:#b8bcbc; }
+    body.single-factory .slot {
+      height:124px; border-color:#343737; border-radius:7px; background:#0e0f0f;
+    }
+    body.single-factory .slot + .slot { margin:0; }
+    body.single-factory .pair-error { min-height:0; padding:0; }
+    body.single-factory .pair-effect-summary {
+      margin:0; padding-top:6px; color:#8f9595; border-color:#292b2b;
+    }
+    body.single-factory .add-pair {
+      width:74px; height:auto; min-height:190px; border-color:#363939; border-radius:8px; background:#151616;
+    }
+    body.single-factory .factory-adjustments {
+      display:flex; flex:1; flex-direction:column; width:100%; max-width:none; margin:12px 0 0; padding:12px;
+      border:1px solid #292b2b; border-radius:10px; background:#131414;
+    }
+    body.single-factory .adjustment-heading { margin-bottom:10px; }
+    body.single-factory .adjustment-heading strong { color:#d9dddd; font-size:11px; }
+    body.single-factory .effects-top {
+      display:grid; grid-template-columns:230px minmax(0,1fr); gap:10px;
+    }
+    body.single-factory .blend-block,
+    body.single-factory .displacement-block {
+      padding:10px; border:1px solid #292b2b; border-radius:8px; background:#171818;
+    }
+    body.single-factory .effect-label {
+      display:block; margin-bottom:8px; color:#8f9494; font-size:9px;
+    }
+    body.single-factory .blend-segments { margin:0; }
+    body.single-factory .blend-segment { height:32px; border-color:#343737; background:#1c1e1e; }
+    body.single-factory .blend-segment.active {
+      color:#0b1611; border-color:#55d69b; background:#55d69b;
+    }
+    body.single-factory .displacement-controls { padding:8px 0 0; border:0; }
+    body.single-factory .factory-curve-wrap {
+      display:flex; flex:1; flex-direction:column; min-height:0; margin-top:10px;
+    }
+    body.single-factory .factory-curve {
+      flex:1; height:auto; min-height:230px; border-color:#292b2b; background:#101111;
+    }
+    @media (max-width:1180px) {
+      body.single-factory .factory-body { grid-template-columns:1fr; }
+      body.single-factory .preview-panel { position:relative; max-width:720px; }
+      body.single-factory .effects-top { grid-template-columns:1fr; }
+    }
+
+    /* 将独立套图页面统一为主工作台的黑灰与橙色视觉。 */
+    :root {
+      --bg:#111111; --panel:#181818; --panel2:#202020; --border:#2e2e2e;
+      --accent:#ff7a3d; --accent2:#ff945f; --text:#f2f5fa; --muted:#9aa3ad;
+    }
+    body.single-factory header { display:none; }
+    body.single-factory main { height:100%; }
+    body.single-factory #viewport { background:#111111; }
+    body.single-factory #world { padding:12px; }
+    body.single-factory .factory-head { margin-bottom:8px; }
+    body.single-factory .preview-panel,
+    body.single-factory .pattern-node,
+    body.single-factory .pairs-wrap,
+    body.single-factory .factory-adjustments { border-color:#2e2e2e; background:#181818; }
+    body.single-factory .transform-panel,
+    body.single-factory .blend-block,
+    body.single-factory .displacement-block { border-color:#343434; background:#202020; }
+    body.single-factory .transform-row input { accent-color:var(--accent); }
+    body.single-factory .pattern-thumb.active,
+    body.single-factory .pair-card:hover,
+    body.single-factory .pair-card.active { border-color:var(--accent); }
+    body.single-factory .pattern-thumb.active,
+    body.single-factory .pair-card.active { box-shadow:0 0 0 2px rgba(255,122,61,.14); }
+    body.single-factory .blend-segment.active {
+      color:#ffffff; border-color:var(--accent); background:var(--accent);
+    }
+    body.single-factory .factory-curve { border-color:#2e2e2e; background:#111111; }
+    body.single-factory .export-factory {
+      color:#ffffff; border-color:var(--accent); background:var(--accent);
+    }
+    body.single-factory .export-factory:hover { background:var(--accent2); }
+
+    /* 放大第三模块文字，并让常用区域在桌面视口内完整显示。 */
+    body.single-factory { font-size:14px; }
+    body.single-factory #viewport { overflow:hidden; }
+    body.fixed-workspace #world,
+    body.fixed-workspace #factories-layer,
+    body.fixed-workspace .factory {
+      height:100%; min-height:0;
+    }
+    body.fixed-workspace #world { overflow:hidden; }
+    body.single-factory .factory {
+      display:flex; flex-direction:column;
+    }
+    body.single-factory .factory-head {
+      flex:0 0 38px; height:38px; min-height:38px; margin-bottom:8px;
+    }
+    body.single-factory .factory-body {
+      flex:1 1 auto; min-height:0; overflow:hidden;
+    }
+    body.single-factory .badge,
+    body.single-factory .mini-btn {
+      min-height:34px; padding:0 13px; font-size:14px; line-height:32px;
+    }
+    body.single-factory .preview-panel {
+      position:relative; display:grid; grid-template-rows:34px minmax(0,1fr) auto;
+      height:100%; min-height:0; overflow:hidden;
+    }
+    body.single-factory .preview-head { height:34px; }
+    body.single-factory .preview-head h3,
+    body.single-factory .node-label span:first-child,
+    body.single-factory .transform-heading strong,
+    body.single-factory .section-heading strong,
+    body.single-factory .adjustment-heading strong {
+      font-size:16px;
+    }
+    body.single-factory .preview-head span,
+    body.single-factory .node-label span:last-child,
+    body.single-factory .transform-heading span,
+    body.single-factory .section-heading span,
+    body.single-factory .adjustment-heading span,
+    body.single-factory .adjustment-line span,
+    body.single-factory .folder-empty,
+    body.single-factory .folder-name,
+    body.single-factory .pattern-count,
+    body.single-factory .pair-index,
+    body.single-factory .pair-error,
+    body.single-factory .pair-effect-summary,
+    body.single-factory .slot-label,
+    body.single-factory .slot-empty,
+    body.single-factory .effect-label,
+    body.single-factory .blend-segment,
+    body.single-factory .displacement-controls label,
+    body.single-factory .displacement-controls output,
+    body.single-factory .curve-caption {
+      font-size:14px;
+    }
+    body.single-factory .factory-preview {
+      align-self:center; justify-self:center; width:auto; max-width:100%; height:100%;
+      min-height:0; aspect-ratio:1;
+    }
+    body.single-factory .transform-panel {
+      margin-top:8px; padding:10px 12px;
+    }
+    body.single-factory .transform-heading { margin-bottom:7px; }
+    body.single-factory .transform-row {
+      grid-template-columns:76px minmax(0,1fr) 52px; min-height:33px;
+    }
+    body.single-factory .transform-row label,
+    body.single-factory .transform-row output {
+      font-size:14px;
+    }
+    body.single-factory .scheme-panel {
+      height:100%; min-height:0; overflow:hidden;
+    }
+    body.single-factory .scheme-flow {
+      flex:0 0 auto; min-height:0;
+    }
+    body.single-factory .pattern-node {
+      max-height:142px; padding:10px 12px; gap:5px 12px; overflow:hidden;
+    }
+    body.single-factory .node-label { height:28px; }
+    body.single-factory .node-label span:last-child {
+      min-height:30px; padding:0 11px; line-height:28px;
+    }
+    body.single-factory .folder-empty { height:82px; }
+    body.single-factory .pattern-grid { gap:7px; padding-bottom:5px; }
+    body.single-factory .pattern-thumb {
+      flex-basis:76px; width:76px;
+    }
+    body.single-factory .pairs-wrap {
+      margin-top:8px; padding:10px 12px; overflow:hidden;
+    }
+    body.single-factory .pairs-zone {
+      flex-wrap:nowrap; gap:10px; overflow-x:auto; overflow-y:hidden; padding-bottom:5px;
+    }
+    body.single-factory .pair-card {
+      flex:0 0 250px; width:250px; padding:8px;
+    }
+    body.single-factory .pair-head { height:26px; }
+    body.single-factory .pair-index { max-width:205px; }
+    body.single-factory .slot { height:108px; }
+    body.single-factory .pair-error,
+    body.single-factory .pair-effect-summary {
+      white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    }
+    body.single-factory .add-pair {
+      flex:0 0 72px; width:72px; min-height:169px;
+    }
+    body.single-factory .factory-adjustments {
+      flex:1 1 auto; min-height:0; margin-top:8px; padding:10px 12px; overflow:hidden;
+    }
+    body.single-factory .adjustment-heading { flex:0 0 auto; margin-bottom:8px; }
+    body.single-factory .effects-top { flex:0 0 auto; }
+    body.single-factory .blend-block,
+    body.single-factory .displacement-block { padding:9px 10px; }
+    body.single-factory .blend-segment { height:34px; }
+    body.single-factory .factory-curve-wrap {
+      flex:1 1 auto; min-height:0; margin-top:8px;
+    }
+    body.single-factory .factory-curve {
+      flex:1 1 auto; height:clamp(150px,23vh,220px); min-height:150px; max-height:220px;
+    }
+    @media (max-height:780px) {
+      body.single-factory #world { padding:8px; }
+      body.single-factory .factory-head { flex-basis:34px; height:34px; min-height:34px; margin-bottom:6px; }
+      body.single-factory .preview-panel { padding:9px; }
+      body.single-factory .transform-panel { padding:8px 10px; }
+      body.single-factory .transform-row { min-height:30px; }
+      body.single-factory .pattern-node { max-height:104px; padding:6px 10px; }
+      body.single-factory .node-label { height:24px; }
+      body.single-factory .node-label span:last-child { min-height:26px; line-height:24px; }
+      body.single-factory .folder-empty { height:62px; }
+      body.single-factory .pattern-thumb { flex-basis:52px; width:52px; }
+      body.single-factory .pairs-wrap { margin-top:6px; padding:6px 9px; }
+      body.single-factory .section-heading { margin-bottom:5px; }
+      body.single-factory .pair-card { flex-basis:220px; width:220px; padding:6px; }
+      body.single-factory .pair-head { height:22px; }
+      body.single-factory .slot { height:64px; }
+      body.single-factory .pair-effect-summary { display:none; }
+      body.single-factory .add-pair { min-height:112px; }
+      body.single-factory .factory-adjustments { margin-top:6px; padding:7px 10px; }
+      body.single-factory .adjustment-heading { margin-bottom:4px; }
+      body.single-factory .effects-top { gap:6px; }
+      body.single-factory .blend-block,
+      body.single-factory .displacement-block { padding:5px 8px; }
+      body.single-factory .effect-label { margin-bottom:4px; }
+      body.single-factory .blend-segment { height:28px; }
+      body.single-factory .displacement-controls { padding:4px 0 0; }
+      body.single-factory .factory-curve-wrap { margin-top:4px; overflow:hidden; }
+      body.single-factory .factory-curve { height:100%; min-height:0; max-height:150px; }
+    }
+    @media (max-width:1180px) {
+      body.single-factory #viewport { overflow:auto; }
+      body.fixed-workspace #world,
+      body.fixed-workspace #factories-layer,
+      body.fixed-workspace .factory { height:auto; min-height:100%; }
+      body.single-factory .factory-body { overflow:visible; }
+      body.single-factory .preview-panel { height:auto; min-height:680px; }
+      body.single-factory .factory-preview { width:100%; height:auto; }
+      body.single-factory .scheme-panel { height:auto; overflow:visible; }
+    }
+
+  </style>
+</head>
+<body class="fixed-workspace single-factory">
+  <header>
+    <h1><span>套图生成</span><small>固定工作区</small></h1>
+    <a class="back" href="../index.html">← 返回主面板</a>
+  </header>
+  <main>
+    <aside class="sidebar">
+      <section class="side-section">
+        <div class="side-title">第一步：创建工作区</div>
+        <div class="card">
+          <div class="factory-template" id="factory-template" draggable="true">
+            <div class="template-title"><span>空白工作区</span><b>＋</b></div>
+            <div class="template-layout"><i></i><i></i></div>
+            <div class="template-tip">拖入工作区或点击按钮创建模板</div>
+          </div>
+          <p>每个工作区都拥有独立预览、独立印花组和独立底图/Mask 配置。</p>
+          <button class="btn" id="btn-add-factory" style="margin-top:12px">添加工作区</button>
+        </div>
+      </section>
+      <section class="side-section canvas-control-section">
+        <div class="side-title">第二步：画布控制</div>
+        <div class="card">
+          <button class="btn secondary" id="btn-locate-all">查看工作区</button>
+          <button class="btn secondary" id="btn-reset-view">重置画布视角</button>
+        </div>
+      </section>
+      <section class="side-section">
+        <div class="side-title">演示与统计</div>
+        <button class="btn secondary" id="btn-demo">加载演示</button>
+        <div class="summary">
+          <div><b id="factory-count">0</b><span>工作区数量</span></div>
+          <div><b id="task-count">0</b><span>待生成图片</span></div>
+        </div>
+      </section>
+    </aside>
+    <section id="viewport">
+      <canvas id="dot-grid"></canvas>
+      <div id="world">
+        <div id="empty-hint"><div><b>添加一个工作区</b>工作区会按顺序锁定排列</div></div>
+        <div id="factories-layer"></div>
+        <div id="loose-layer"></div>
+      </div>
+      <div class="viewport-tips">
+        <span><b>拖顶部手柄</b> 移动整套模板</span>
+        <span><b>空格 + 左键 / 中键</b> 平移画布</span>
+        <span><b>滚轮</b> 鼠标中心缩放</span>
+        <span><b>拖底图或 Mask</b> 移入 / 移出工作区</span>
+      </div>
+      <div class="zoom-indicator" id="zoom-indicator">100%</div>
+    </section>
+  </main>
+  <input id="folder-input" type="file" webkitdirectory directory multiple accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp">
+  <input id="slot-input" type="file" accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp">
+  <div class="toast" id="toast"></div>
+  <div class="progress" id="progress">
+    <div class="progress-box">
+      <h3 id="progress-title">正在生成效果图</h3>
+      <div class="bar"><i id="progress-fill"></i></div>
+      <div class="progress-line"><span id="progress-text">初始化</span><span id="progress-percent">0%</span></div>
+      <div class="log" id="progress-log"></div>
+    </div>
+  </div>
+  <script>
+    "use strict";
+
+    document.documentElement.dataset.jszipReady = typeof JSZip === "undefined" ? "false" : "true";
+    const $ = /** Handle this UI callback. */function (selector, root = document) {
+      return root.querySelector(selector);
+    };
+    const viewport = $("#viewport");
+    const world = $("#world");
+    const dotGrid = $("#dot-grid");
+    const factoriesLayer = $("#factories-layer");
+    const looseLayer = $("#loose-layer");
+    const collator = new Intl.Collator("zh-CN", {
+      numeric: true,
+      sensitivity: "base"
+    });
+    const fixedWorkspace = true;
+    let idCounter = 0;
+    let factorySerial = 0;
+    let factories = [];
+    let looseItems = [];
+    let pendingFolderFactoryId = null;
+    let pendingSlot = null;
+    let dragPayload = null;
+    let selectedLooseId = null;
+    let toastTimer = null;
+    let spaceDown = false;
+    let panning = null;
+    let factoryMove = null;
+    let printDrag = null;
+    let view = {
+      x: 40,
+      y: 35,
+      zoom: .68
+    };
+    let gridFrame = 0;
+    const gridPointer = {
+      x: -10000,
+      y: -10000,
+      inside: false
+    };
+    /** Handle this mockup workspace operation. */
+    function uid(prefix) {
+      idCounter += 1;
+      return `${prefix}-${Date.now().toString(36)}-${idCounter}`;
+    }
+    /** Handle this mockup workspace operation. */
+    function stem(name) {
+      return (name || "image").replace(/\.[^.]+$/, "");
+    }
+    /** Handle this mockup workspace operation. */
+    function safeName(name, fallback = "image") {
+      const value = (name || fallback).replace(/[\/\\?%*:|"<>\s]+/g, "_").replace(/^_+|_+$/g, "");
+      return value || fallback;
+    }
+    /** Handle this mockup workspace operation. */
+    function truncateUtf8(value, maxBytes) {
+      const encoder = new TextEncoder();
+      let result = "";
+      let used = 0;
+      for (const character of value) {
+        const size = encoder.encode(character).length;
+        if (used + size > maxBytes) break;
+        result += character;
+        used += size;
+      }
+      return result;
+    }
+    /** Handle this mockup workspace operation. */
+    function zipSafeComponent(name, fallback, maxBytes) {
+      const cleaned = safeName(name, fallback).replace(/[. ]+$/g, "");
+      return truncateUtf8(cleaned || fallback, maxBytes).replace(/[. ]+$/g, "") || fallback;
+    }
+    /** Handle this mockup workspace operation. */
+    function validImageFile(file) {
+      return !!file && (file.type.startsWith("image/") || /\.(png|jpe?g|webp)$/i.test(file.name));
+    }
+
+    /** 创建一条保持印花原始明暗的默认曲线。 */
+    function makeDefaultFactoryCurve() {
+      return [{
+        x: 0,
+        y: 0
+      }, {
+        x: 1,
+        y: 1
+      }];
+    }
+
+    /** 创建一套仅属于单个产品模板的默认渲染效果。 */
+    function makeDefaultTemplateEffects() {
+      return {
+        blendMode: "multiply",
+        displacementEnabled: true,
+        displacementX: 15,
+        displacementY: 15,
+        curvePoints: makeDefaultFactoryCurve(),
+        curveLut: null,
+        curveDragIndex: -1
+      };
+    }
+
+    /** 创建产品图、蒙版及其独立渲染效果的模板配对。 */
+    function makePair(base = null, mask = null) {
+      return {
+        id: uid("pair"),
+        name: base ? stem(base.name) : "未命名底图",
+        base,
+        mask,
+        effects: makeDefaultTemplateEffects()
+      };
+    }
+
+    /** 确保旧模板也拥有独立效果配置并返回该配置。 */
+    function ensureTemplateEffects(pair) {
+      if (!pair.effects) pair.effects = makeDefaultTemplateEffects();
+      return pair.effects;
+    }
+
+    /** 返回当前选中产品模板的独立效果配置。 */
+    function activeTemplateEffects(factory) {
+      const pair = activePair(factory);
+      return pair ? ensureTemplateEffects(pair) : null;
+    }
+    /** Handle this mockup workspace operation. */
+    function makeFactory(x, y, options = {}) {
+      factorySerial += 1;
+      return {
+        id: uid("factory"),
+        serial: factorySerial,
+        name: options.name || "套图工作区",
+        x,
+        y,
+        patterns: options.patterns || [],
+        patternFolderName: options.patternFolderName || "",
+        pairs: options.pairs || [makePair()],
+        activePairId: options.activePairId || null,
+        activePatternId: options.activePatternId || null,
+        transform: {
+          x: .5,
+          y: .5,
+          size: .32,
+          rotation: 0,
+          ...(options.transform || {})
+        },
+        previewFrame: 0,
+        lastInteractivePreview: 0,
+        previewRect: null,
+        entering: true,
+        element: null,
+        canvas: null
+      };
+    }
+    /** Handle this mockup workspace operation. */
+    function getFactory(factoryId) {
+      return factories.find(/** Handle this UI callback. */function (factory) {
+        return factory.id === factoryId;
+      }) || null;
+    }
+    /** Handle this mockup workspace operation. */
+    function pairError(pair) {
+      if (!pair.base && pair.mask) return "缺少底图：Mask 不能独立占位";
+      if (pair.base && pair.mask && (pair.base.width !== pair.mask.width || pair.base.height !== pair.mask.height)) {
+        return `尺寸不匹配：${pair.base.width}×${pair.base.height} / ${pair.mask.width}×${pair.mask.height}`;
+      }
+      return "";
+    }
+    /** Handle this mockup workspace operation. */
+    function readyPairs(factory) {
+      return factory.pairs.filter(/** Handle this UI callback. */function (pair) {
+        return pair.base && !pairError(pair);
+      });
+    }
+    /** Handle this mockup workspace operation. */
+    function blockingErrors(factory) {
+      return factory.pairs.filter(/** Handle this UI callback. */function (pair) {
+        return pairError(pair);
+      });
+    }
+    /** Handle this mockup workspace operation. */
+    function activePair(factory) {
+      return factory.pairs.find(/** Handle this UI callback. */function (pair) {
+        return pair.id === factory.activePairId;
+      }) || null;
+    }
+    /** Handle this mockup workspace operation. */
+    function activePattern(factory) {
+      return factory.patterns.find(/** Handle this UI callback. */function (pattern) {
+        return pattern.id === factory.activePatternId;
+      }) || null;
+    }
+    /** Handle this mockup workspace operation. */
+    function factoryUsable(factory) {
+      return readyPairs(factory).length > 0 && factory.patterns.length > 0 && blockingErrors(factory).length === 0;
+    }
+    /** Handle this mockup workspace operation. */
+    function showToast(message, error = false) {
+      const el = $("#toast");
+      el.textContent = message;
+      el.className = `toast show${error ? " error" : ""}`;
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(/** Handle this UI callback. */function () {
+        el.className = "toast";
+      }, 2800);
+    }
+    /** Handle this mockup workspace operation. */
+    function loadFileAsset(file) {
+      return new Promise(/** Handle this UI callback. */function (resolve, reject) {
+        if (!validImageFile(file)) return reject(new Error("仅支持 PNG、JPG、WebP 图片"));
+        const url = URL.createObjectURL(file);
+        const img = new Image();
+        img.onload = /** Handle this UI callback. */function () {
+          return resolve({
+            id: uid("asset"),
+            name: file.name,
+            img,
+            url,
+            width: img.naturalWidth,
+            height: img.naturalHeight
+          });
+        };
+        img.onerror = /** Handle this UI callback. */function () {
+          URL.revokeObjectURL(url);
+          reject(new Error(`无法读取 ${file.name}`));
+        };
+        img.src = url;
+      });
+    }
+    /** Handle this mockup workspace operation. */
+    function assetFromCanvas(name, sourceCanvas) {
+      return new Promise(/** Handle this UI callback. */function (resolve, reject) {
+        const img = new Image();
+        img.onload = /** Handle this UI callback. */function () {
+          return resolve({
+            id: uid("asset"),
+            name,
+            img,
+            url: img.src,
+            width: img.width,
+            height: img.height
+          });
+        };
+        img.onerror = reject;
+        img.src = sourceCanvas.toDataURL("image/png");
+      });
+    }
+    /** Handle this mockup workspace operation. */
+    function scheduleDotGrid() {
+      if (gridFrame) return;
+      gridFrame = requestAnimationFrame(/** Handle this UI callback. */function () {
+        gridFrame = 0;
+        drawDotGrid();
+      });
+    }
+    /** Handle this mockup workspace operation. */
+    function drawDotGrid() {
+      const width = viewport.clientWidth;
+      const height = viewport.clientHeight;
+      if (!width || !height) return;
+      const ratio = Math.min(2, window.devicePixelRatio || 1);
+      const pixelWidth = Math.round(width * ratio);
+      const pixelHeight = Math.round(height * ratio);
+      if (dotGrid.width !== pixelWidth || dotGrid.height !== pixelHeight) {
+        dotGrid.width = pixelWidth;
+        dotGrid.height = pixelHeight;
+      }
+      const ctx = dotGrid.getContext("2d");
+      ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+      ctx.clearRect(0, 0, width, height);
+      let worldStep = 40;
+      while (worldStep * view.zoom < 18) worldStep *= 5;
+      while (worldStep * view.zoom > 100) worldStep /= 5;
+      const step = worldStep * view.zoom;
+      const startX = (view.x % step + step) % step;
+      const startY = (view.y % step + step) % step;
+      const halfLife = 72;
+      const baseRadius = 1.05;
+      const magnify = 5.2;
+      for (let y = startY; y <= height + step; y += step) {
+        for (let x = startX; x <= width + step; x += step) {
+          const distance = gridPointer.inside ? Math.hypot(x - gridPointer.x, y - gridPointer.y) : 10000;
+          const influence = gridPointer.inside ? Math.pow(.5, distance / halfLife) : 0;
+          const radius = baseRadius + magnify * influence;
+          const red = Math.round(91 + (205 - 91) * influence);
+          const green = Math.round(98 + (222 - 98) * influence);
+          const blue = Math.round(108 + (214 - 108) * influence);
+          const alpha = .24 + .64 * influence;
+          ctx.fillStyle = `rgba(${red},${green},${blue},${alpha})`;
+          ctx.beginPath();
+          ctx.arc(x, y, radius, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    }
+    /** Handle this mockup workspace operation. */
+    function updateView() {
+      if (fixedWorkspace) {
+        world.style.transform = "none";
+        return;
+      }
+      world.style.transform = `translate(${view.x}px,${view.y}px) scale(${view.zoom})`;
+      $("#zoom-indicator").textContent = `${Math.round(view.zoom * 100)}%`;
+      scheduleDotGrid();
+    }
+    /** Handle this mockup workspace operation. */
+    function screenToWorld(clientX, clientY) {
+      const rect = viewport.getBoundingClientRect();
+      return {
+        x: (clientX - rect.left - view.x) / view.zoom,
+        y: (clientY - rect.top - view.y) / view.zoom
+      };
+    }
+    /** Handle this mockup workspace operation. */
+    function focusBounds(left, top, right, bottom, maxZoom = 1) {
+      const w = viewport.clientWidth;
+      const h = viewport.clientHeight;
+      const bw = Math.max(200, right - left);
+      const bh = Math.max(200, bottom - top);
+      view.zoom = Math.min(maxZoom, Math.max(.035, Math.min((w - 80) / bw, (h - 80) / bh)));
+      view.x = (w - bw * view.zoom) / 2 - left * view.zoom;
+      view.y = (h - bh * view.zoom) / 2 - top * view.zoom;
+      updateView();
+    }
+    /** Handle this mockup workspace operation. */
+    function focusAll() {
+      if (fixedWorkspace) {
+        viewport.scrollLeft = 0;
+        viewport.scrollTop = 0;
+        return;
+      }
+      if (!factories.length && !looseItems.length) {
+        view = {
+          x: 70,
+          y: 55,
+          zoom: 1
+        };
+        return updateView();
+      }
+      const left = Math.min(...factories.map(/** Handle this UI callback. */function (factory) {
+        return factory.x;
+      }), ...looseItems.map(/** Handle this UI callback. */function (item) {
+        return item.x;
+      }), 0);
+      const top = Math.min(...factories.map(/** Handle this UI callback. */function (factory) {
+        return factory.y;
+      }), ...looseItems.map(/** Handle this UI callback. */function (item) {
+        return item.y;
+      }), 0);
+      const right = Math.max(...factories.map(/** Handle this UI callback. */function (factory) {
+        return factory.x + 1510;
+      }), ...looseItems.map(/** Handle this UI callback. */function (item) {
+        return item.x + 180;
+      }), 100);
+      const bottom = Math.max(...factories.map(/** Handle this UI callback. */function (factory) {
+        return factory.y + (factory.element?.offsetHeight || 610);
+      }), ...looseItems.map(/** Handle this UI callback. */function (item) {
+        return item.y + 180;
+      }), 100);
+      focusBounds(left - 40, top - 40, right + 40, bottom + 40, .9);
+    }
+    /** Handle this mockup workspace operation. */
+    function addFactoryAt(x, y, options = {}) {
+      if (factories.length) return factories[0];
+      const factory = makeFactory(x, y, options);
+      factories.push(factory);
+      renderAll();
+      requestAnimationFrame(/** Handle this UI callback. */function () {
+        factory.element?.classList.remove("entering");
+        factory.entering = false;
+      });
+      return factory;
+    }
+    /** Handle this mockup workspace operation. */
+    function addFactoryAtViewportCenter() {
+      if (factories.length) {
+        focusAll();
+        showToast("当前仅支持一个工作区");
+        return factories[0];
+      }
+      const rect = viewport.getBoundingClientRect();
+      const point = screenToWorld(rect.left + rect.width / 2, rect.top + rect.height / 2);
+      const offset = factories.length * 34;
+      const factory = addFactoryAt(point.x - 755 + offset, point.y - 305 + offset);
+      focusBounds(factory.x - 30, factory.y - 30, factory.x + 1540, factory.y + 640, .9);
+      showToast(`${factory.name} 已创建`);
+    }
+    /** Handle this mockup workspace operation. */
+    function renderPatternNode(factory, root) {
+      const node = $(".pattern-node", root);
+      node.innerHTML = "";
+      const label = document.createElement("div");
+      label.className = "node-label";
+      label.innerHTML = "<span>印花组</span><span>选择文件夹</span>";
+      node.appendChild(label);
+      if (!factory.patterns.length) {
+        const empty = document.createElement("div");
+        empty.className = "folder-empty";
+        empty.textContent = "点击选择印花文件夹（仅读取第一层 PNG / JPG / WebP）";
+        node.appendChild(empty);
+      } else {
+        const folder = document.createElement("div");
+        folder.className = "folder-name";
+        folder.textContent = `📁 ${factory.patternFolderName || "印花组"}`;
+        const count = document.createElement("div");
+        count.className = "pattern-count";
+        count.textContent = `${factory.patterns.length} 张印花`;
+        const list = document.createElement("div");
+        list.className = "pattern-grid";
+        factory.patterns.forEach(/** Handle this UI callback. */function (pattern) {
+          const item = document.createElement("div");
+          item.className = `pattern-thumb${pattern.id === factory.activePatternId ? " active" : ""}`;
+          item.title = pattern.name;
+          const img = document.createElement("img");
+          img.src = pattern.url;
+          item.appendChild(img);
+          item.addEventListener("click", /** Handle this UI callback. */function (event) {
+            event.stopPropagation();
+            factory.activePatternId = pattern.id;
+            renderAll();
+          });
+          list.appendChild(item);
+        });
+        node.append(folder, count, list);
+      }
+      node.addEventListener("click", /** Handle this UI callback. */function () {
+        pendingFolderFactoryId = factory.id;
+        $("#folder-input").value = "";
+        $("#folder-input").click();
+      });
+    }
+    /** Handle this mockup workspace operation. */
+    function makeSlot(factory, pair, type) {
+      const asset = pair[type];
+      const slot = document.createElement("div");
+      slot.className = `slot${asset ? " has-file" : ""}`;
+      if (asset) {
+        const img = document.createElement("img");
+        img.src = asset.url;
+        slot.appendChild(img);
+        slot.draggable = true;
+      } else {
+        const empty = document.createElement("div");
+        empty.className = "slot-empty";
+        empty.textContent = type === "base" ? "点击或拖入\n单张底图" : "点击或拖入 Mask\n留空 = 全白";
+        empty.style.whiteSpace = "pre-line";
+        slot.appendChild(empty);
+      }
+      const label = document.createElement("span");
+      label.className = "slot-label";
+      label.textContent = type === "base" ? "底图" : asset ? "Mask" : "Mask · 全白";
+      slot.appendChild(label);
+      slot.addEventListener("click", /** Handle this UI callback. */function (event) {
+        event.stopPropagation();
+        pendingSlot = {
+          factoryId: factory.id,
+          pairId: pair.id,
+          type
+        };
+        $("#slot-input").value = "";
+        $("#slot-input").click();
+      });
+      slot.addEventListener("dragstart", /** Handle this UI callback. */function (event) {
+        event.stopPropagation();
+        if (!asset) return event.preventDefault();
+        dragPayload = {
+          kind: type === "base" ? "pair" : "mask",
+          source: "factory",
+          factoryId: factory.id,
+          pairId: pair.id
+        };
+        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.setData("text/plain", dragPayload.kind);
+      });
+      slot.addEventListener("dragover", /** Handle this UI callback. */function (event) {
+        event.preventDefault();
+        event.stopPropagation();
+        slot.classList.add("drop-target");
+      });
+      slot.addEventListener("dragleave", /** Handle this UI callback. */function () {
+        return slot.classList.remove("drop-target");
+      });
+      slot.addEventListener("drop", /** Handle this UI callback. */function (event) {
+        event.preventDefault();
+        event.stopPropagation();
+        slot.classList.remove("drop-target");
+        const files = [...event.dataTransfer.files].filter(validImageFile);
+        if (files.length) return assignFileToSlot(factory.id, pair.id, type, files[0]);
+        if (type === "mask" && dragPayload?.kind === "mask") {
+          moveMaskToPair(factory.id, pair.id);
+        } else if (type === "base" && dragPayload?.kind === "pair") {
+          movePairToFactory(factory.id, pair.id);
+        }
+      });
+      return slot;
+    }
+    /** Handle this mockup workspace operation. */
+    function renderPairs(factory, root) {
+      const zone = $(".pairs-zone", root);
+      zone.innerHTML = "";
+      factory.pairs.forEach(/** Handle this UI callback. */function (pair, index) {
+        const error = pairError(pair);
+        const effects = ensureTemplateEffects(pair);
+        const card = document.createElement("article");
+        card.dataset.pairId = pair.id;
+        card.className = `pair-card${pair.id === factory.activePairId ? " active" : ""}${error ? " invalid" : ""}`;
+        const head = document.createElement("div");
+        head.className = "pair-head";
+        const idx = document.createElement("span");
+        idx.className = "pair-index";
+        idx.textContent = `${String(index + 1).padStart(2, "0")} · ${pair.base ? pair.name : "空配对"}`;
+        idx.title = pair.name;
+        const del = document.createElement("button");
+        del.className = "delete-pair";
+        del.textContent = "×";
+        del.title = "删除这一对";
+        del.addEventListener("click", /** Handle this UI callback. */function (event) {
+          event.stopPropagation();
+          factory.pairs = factory.pairs.filter(/** Handle this UI callback. */function (item) {
+            return item.id !== pair.id;
+          });
+          if (!factory.pairs.length) factory.pairs.push(makePair());
+          if (factory.activePairId === pair.id) factory.activePairId = null;
+          renderAll();
+        });
+        head.append(idx, del);
+        card.append(head, makeSlot(factory, pair, "base"), makeSlot(factory, pair, "mask"));
+        const errorBox = document.createElement("div");
+        errorBox.className = "pair-error";
+        errorBox.textContent = error || (pair.base && !pair.mask ? "Mask 留空：导出时使用全白" : "");
+        card.appendChild(errorBox);
+        const effectSummary = document.createElement("div");
+        effectSummary.className = "pair-effect-summary";
+        effectSummary.textContent = `${effects.blendMode === "linear-burn" ? "线性加深" : "正片叠底"} · ${effects.displacementEnabled ? `置换 ${effects.displacementX}/${effects.displacementY}` : "置换关闭"} · 独立曲线`;
+        card.appendChild(effectSummary);
+        card.title = pair.base ? "点击切换到此模板并加载它的独立效果" : "先放入产品图";
+        card.addEventListener("click", /** Handle this UI callback. */function () {
+          if (pair.base && !error) {
+            factory.activePairId = pair.id;
+            renderAll();
+          }
+        });
+        card.addEventListener("dragover", /** Handle this UI callback. */function (event) {
+          if (dragPayload?.kind !== "pair") return;
+          event.preventDefault();
+          event.stopPropagation();
+          card.classList.add("drop-target");
+        });
+        card.addEventListener("dragleave", /** Handle this UI callback. */function () {
+          return card.classList.remove("drop-target");
+        });
+        card.addEventListener("drop", /** Handle this UI callback. */function (event) {
+          if (dragPayload?.kind !== "pair") return;
+          event.preventDefault();
+          event.stopPropagation();
+          card.classList.remove("drop-target");
+          movePairToFactory(factory.id, pair.id);
+        });
+        zone.appendChild(card);
+      });
+      const add = document.createElement("button");
+      add.className = "add-pair";
+      add.textContent = "+";
+      add.title = "新增一组空的底图 / Mask 配对";
+      add.addEventListener("click", /** Handle this UI callback. */function (event) {
+        event.stopPropagation();
+        factory.pairs.push(makePair());
+        renderAll();
+      });
+      zone.appendChild(add);
+      zone.addEventListener("dragover", /** Handle this UI callback. */function (event) {
+        if (dragPayload?.kind !== "pair") return;
+        event.preventDefault();
+        event.stopPropagation();
+        zone.classList.add("drop-ready");
+      });
+      zone.addEventListener("dragleave", /** Handle this UI callback. */function (event) {
+        if (!zone.contains(event.relatedTarget)) zone.classList.remove("drop-ready");
+      });
+      zone.addEventListener("drop", /** Handle this UI callback. */function (event) {
+        if (dragPayload?.kind !== "pair") return;
+        event.preventDefault();
+        event.stopPropagation();
+        zone.classList.remove("drop-ready");
+        movePairToFactory(factory.id);
+      });
+    }
+    /** Handle this mockup workspace operation. */
+    function renderFactory(factory) {
+      const el = document.createElement("section");
+      const selectedPair = activePair(factory);
+      const effects = selectedPair ? ensureTemplateEffects(selectedPair) : makeDefaultTemplateEffects();
+      const controlsDisabled = selectedPair?.base && !pairError(selectedPair) ? "" : " disabled";
+      el.className = `factory${factory.entering ? " entering" : ""}`;
+      el.dataset.factoryId = factory.id;
+      el.style.left = `${factory.x}px`;
+      el.style.top = `${factory.y}px`;
+      el.innerHTML = `
+            <div class="factory-head">
+              <div class="factory-title-wrap">
+                <div class="factory-handle" title="拖动整个工作区">⠿</div>
+                <div class="factory-title">
+                  <h2>${factory.name}</h2>
+                  <p>单一印花组 · 多产品模板 · 固定工作区</p>
+                </div>
+              </div>
+              <div class="factory-actions">
+                <span class="badge factory-state">等待素材</span>
+                <button class="mini-btn reset-pattern">重置印花</button>
+                <button class="mini-btn apply-factory" disabled>一键使用</button>
+                <button class="mini-btn primary export-factory" disabled>导出 ZIP</button>
+                <button class="mini-btn danger delete-factory">删除</button>
+              </div>
+            </div>
+            <div class="factory-body">
+              <section class="preview-panel">
+                <div class="preview-head">
+                  <h3>产品预览与印花编辑</h3>
+                  <span class="badge active-name">尚未使用方案</span>
+                </div>
+                <canvas class="factory-preview" width="720" height="720"></canvas>
+                <div class="transform-panel" data-factory-id="${factory.id}">
+                  <div class="transform-heading">
+                    <strong>位置与缩放</strong>
+                    <span>也可直接拖动预览中的印花</span>
+                  </div>
+                  <div class="transform-row">
+                    <label>缩放</label>
+                    <input class="transform-range" type="range" min="0.02" max="4" step="0.01" value="${factory.transform.size}" data-transform-key="size">
+                    <output class="transform-value" data-transform-key="size">${Math.round(factory.transform.size * 100)}%</output>
+                  </div>
+                  <div class="transform-row">
+                    <label>水平位置</label>
+                    <input class="transform-range" type="range" min="-100" max="200" step="1" value="${Math.round(factory.transform.x * 100)}" data-transform-key="x">
+                    <output class="transform-value" data-transform-key="x">${Math.round(factory.transform.x * 100)}</output>
+                  </div>
+                  <div class="transform-row">
+                    <label>垂直位置</label>
+                    <input class="transform-range" type="range" min="-100" max="200" step="1" value="${Math.round(factory.transform.y * 100)}" data-transform-key="y">
+                    <output class="transform-value" data-transform-key="y">${Math.round(factory.transform.y * 100)}</output>
+                  </div>
+                </div>
+              </section>
+              <section class="scheme-panel">
+                <div class="scheme-caption">
+                  <h3>套图配置</h3>
+                  <p>印花组 × 底图/Mask 配对</p>
+                </div>
+                <div class="scheme-flow">
+                  <div class="pattern-node" title="点击选择印花文件夹"></div>
+                  <div class="pairs-wrap">
+                    <div class="section-heading">
+                      <strong>产品模板</strong>
+                      <span>点击模板切换预览与独立效果</span>
+                    </div>
+                    <div class="pairs-zone"></div>
+                  </div>
+                </div>
+                <div class="factory-adjustments${controlsDisabled ? " no-template" : ""}" data-factory-id="${factory.id}">
+                  <div class="adjustment-heading">
+                    <strong>当前模板效果</strong>
+                    <span class="adjustment-template-name">${selectedPair?.base ? selectedPair.name : "点击上方模板后调整"}</span>
+                  </div>
+                  <div class="effects-top">
+                    <div class="blend-block">
+                      <span class="effect-label">混合模式</span>
+                      <div class="blend-segments">
+                        <button class="blend-segment${effects.blendMode === "multiply" ? " active" : ""}" type="button" data-blend-mode="multiply"${controlsDisabled}>正片叠底</button>
+                        <button class="blend-segment${effects.blendMode === "linear-burn" ? " active" : ""}" type="button" data-blend-mode="linear-burn"${controlsDisabled}>线性加深</button>
+                      </div>
+                    </div>
+                    <div class="displacement-block">
+                      <div class="adjustment-line">
+                        <label class="displacement-switch">
+                          <input class="displacement-toggle" type="checkbox"${effects.displacementEnabled ? " checked" : ""}${controlsDisabled}>
+                          <span>扭曲置换</span>
+                        </label>
+                        <span class="adjustment-mode-name">${effects.blendMode === "linear-burn" ? "线性加深" : "正片叠底"} · 产品灰度 × 蒙版区域</span>
+                      </div>
+                      <div class="displacement-controls">
+                        <label>强度</label>
+                        <input class="displacement-range" type="range" min="-50" max="50" step="1" value="${effects.displacementX}" data-axis="both"${effects.displacementEnabled ? controlsDisabled : " disabled"}>
+                        <output class="displacement-value" data-axis="both">${effects.displacementX}</output>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="factory-curve-wrap">
+                    <div class="adjustment-line">
+                      <strong>该模板的印花明暗曲线</strong>
+                      <button class="mini-btn reset-curve" type="button"${controlsDisabled}>重置曲线</button>
+                    </div>
+                    <canvas class="factory-curve" width="900" height="240" data-factory-id="${factory.id}" aria-disabled="${controlsDisabled ? "true" : "false"}"></canvas>
+                    <div class="curve-caption"><span>暗部</span><span>单击打点 · 拖动调整 · 双击删除</span><span>亮部</span></div>
+                  </div>
+                </div>
+              </section>
+            </div>`;
+      factory.element = el;
+      factory.canvas = $(".factory-preview", el);
+      $(".factory-handle", el).addEventListener("mousedown", /** Handle this UI callback. */function (event) {
+        if (fixedWorkspace) return;
+        if (event.button !== 0) return;
+        event.preventDefault();
+        event.stopPropagation();
+        factoryMove = {
+          id: factory.id,
+          startX: event.clientX,
+          startY: event.clientY,
+          originX: factory.x,
+          originY: factory.y
+        };
+      });
+      $(".reset-pattern", el).addEventListener("click", /** Handle this UI callback. */function () {
+        factory.transform = {
+          x: .5,
+          y: .5,
+          size: .32,
+          rotation: 0
+        };
+        updateFactoryTransformUi(factory);
+        scheduleFactoryPreview(factory, false);
+      });
+      $(".apply-factory", el).addEventListener("click", /** Handle this UI callback. */function () {
+        return applyFactory(factory);
+      });
+      $(".export-factory", el).addEventListener("click", /** Handle this UI callback. */function () {
+        return exportFactory(factory);
+      });
+      $(".delete-factory", el).addEventListener("click", /** Handle this UI callback. */function () {
+        if (!confirm(`删除 ${factory.name}？`)) return;
+        factories = factories.filter(/** Handle this UI callback. */function (item) {
+          return item.id !== factory.id;
+        });
+        renderAll();
+      });
+      el.addEventListener("dragover", /** Handle this UI callback. */function (event) {
+        if (!dragPayload || dragPayload.kind === "factory-template") return;
+        event.preventDefault();
+        el.classList.add("drop-ready");
+      });
+      el.addEventListener("dragleave", /** Handle this UI callback. */function (event) {
+        if (!el.contains(event.relatedTarget)) el.classList.remove("drop-ready");
+      });
+      el.addEventListener("drop", /** Handle this UI callback. */function (event) {
+        el.classList.remove("drop-ready");
+        if (event.defaultPrevented) return;
+        const files = [...event.dataTransfer.files].filter(validImageFile);
+        if (files.length) {
+          event.preventDefault();
+          event.stopPropagation();
+          const empty = factory.pairs.find(/** Handle this UI callback. */function (pair) {
+            return !pair.base && !pair.mask;
+          }) || makePair();
+          if (!factory.pairs.includes(empty)) factory.pairs.push(empty);
+          assignFileToSlot(factory.id, empty.id, "base", files[0]);
+        }
+      });
+      renderPatternNode(factory, el);
+      renderPairs(factory, el);
+      updateFactoryStatus(factory);
+      bindPreview(factory);
+      bindFactoryTransformControls(factory);
+      bindFactoryAdjustments(factory);
+      if (factory.curveResizeObserver) factory.curveResizeObserver.disconnect();
+      if (window.ResizeObserver) {
+        factory.curveResizeObserver = new ResizeObserver(
+        /** 曲线显示尺寸发生变化时，按新的像素密度重新绘制。 */
+        function redrawResizedFactoryCurve() {
+          if (factory.element === el) drawFactoryCurve(factory);
+        });
+        factory.curveResizeObserver.observe($(".factory-curve", el));
+      }
+      return el;
+    }
+    /** Handle this mockup workspace operation. */
+    function updateFactoryStatus(factory) {
+      if (!factory.element) return;
+      const valid = readyPairs(factory);
+      const errors = blockingErrors(factory);
+      const usable = factoryUsable(factory);
+      const state = $(".factory-state", factory.element);
+      $(".apply-factory", factory.element).disabled = !usable;
+      $(".export-factory", factory.element).disabled = !usable;
+      if (errors.length) state.textContent = `${errors.length} 个尺寸错误`;else if (!factory.patterns.length) state.textContent = "等待印花组";else if (!valid.length) state.textContent = "等待底图";else state.textContent = `${valid.length} 对 × ${factory.patterns.length} 张`;
+    }
+    /** Handle this mockup workspace operation. */
+    function renderLooseItems() {
+      looseLayer.innerHTML = "";
+      looseItems.forEach(/** Handle this UI callback. */function (item) {
+        const el = document.createElement("div");
+        el.className = `loose-item${item.type === "mask" ? " mask-only" : ""}${item.id === selectedLooseId ? " selected" : ""}`;
+        el.style.left = `${item.x}px`;
+        el.style.top = `${item.y}px`;
+        el.draggable = true;
+        const head = document.createElement("div");
+        head.className = "loose-head";
+        head.innerHTML = `<span>${item.type === "pair" ? "框外配对" : "框外 Mask"}</span><span>拖入工作区</span>`;
+        const thumbs = document.createElement("div");
+        thumbs.className = "loose-thumbs";
+        const assets = item.type === "pair" ? [item.pair.base, item.pair.mask] : [item.asset];
+        assets.forEach(/** Handle this UI callback. */function (asset, index) {
+          const box = document.createElement("div");
+          box.className = "loose-thumb";
+          if (asset) {
+            const img = document.createElement("img");
+            img.src = asset.url;
+            box.appendChild(img);
+          } else {
+            box.textContent = index ? "Mask 全白" : "空";
+          }
+          thumbs.appendChild(box);
+        });
+        el.append(head, thumbs);
+        el.addEventListener("click", /** Handle this UI callback. */function (event) {
+          event.stopPropagation();
+          selectedLooseId = item.id;
+          renderLooseItems();
+        });
+        el.addEventListener("dragstart", /** Handle this UI callback. */function (event) {
+          dragPayload = item.type === "pair" ? {
+            kind: "pair",
+            source: "loose",
+            looseId: item.id
+          } : {
+            kind: "mask",
+            source: "loose",
+            looseId: item.id
+          };
+          event.dataTransfer.effectAllowed = "move";
+          event.dataTransfer.setData("text/plain", dragPayload.kind);
+        });
+        looseLayer.appendChild(el);
+      });
+    }
+    /** Handle this mockup workspace operation. */
+    function renderSummary() {
+      $("#factory-count").textContent = factories.length;
+      const tasks = factories.reduce(/** Handle this UI callback. */function (total, factory) {
+        return total + readyPairs(factory).length * factory.patterns.length;
+      }, 0);
+      $("#task-count").textContent = tasks;
+      $("#empty-hint").style.display = factories.length ? "none" : "grid";
+    }
+    /** Handle this mockup workspace operation. */
+    function renderAll() {
+      factoriesLayer.innerHTML = "";
+      factories.forEach(/** Handle this UI callback. */function (factory) {
+        return factoriesLayer.appendChild(renderFactory(factory));
+      });
+      renderLooseItems();
+      renderSummary();
+      factories.forEach(drawPreview);
+    }
+    /** Handle this mockup workspace operation. */
+    async function handleFolder(factoryId, files) {
+      const factory = getFactory(factoryId);
+      if (!factory) return;
+      const topLevel = [...files].filter(/** Handle this UI callback. */function (file) {
+        if (!validImageFile(file)) return false;
+        const path = file.webkitRelativePath || "";
+        return !path || path.split("/").filter(Boolean).length === 2;
+      }).sort(/** Handle this UI callback. */function (a, b) {
+        return collator.compare(a.name, b.name);
+      });
+      if (!topLevel.length) return showToast("文件夹第一层没有 PNG、JPG 或 WebP 图片", true);
+      try {
+        factory.patterns = await Promise.all(topLevel.map(loadFileAsset));
+        const path = topLevel[0].webkitRelativePath || "";
+        factory.patternFolderName = path ? path.split("/")[0] : "印花组";
+        factory.activePatternId = factory.patterns[0].id;
+        renderAll();
+        showToast(`${factory.name} 已载入 ${factory.patterns.length} 张印花`);
+      } catch (error) {
+        showToast(error.message, true);
+      }
+    }
+    /** Handle this mockup workspace operation. */
+    async function assignFileToSlot(factoryId, pairId, type, file) {
+      try {
+        const asset = await loadFileAsset(file);
+        const factory = getFactory(factoryId);
+        const pair = factory?.pairs.find(/** Handle this UI callback. */function (item) {
+          return item.id === pairId;
+        });
+        if (!factory || !pair) return;
+        pair[type] = asset;
+        if (type === "base") pair.name = stem(asset.name);
+        if (pair.base && !pairError(pair)) factory.activePairId = pair.id;
+        renderAll();
+        const error = pairError(pair);
+        if (error) showToast(`${factory.name}：${error}`, true);
+      } catch (error) {
+        showToast(error.message, true);
+      }
+    }
+    /** Handle this mockup workspace operation. */
+    function takeDraggedPair() {
+      if (dragPayload?.kind !== "pair") return null;
+      if (dragPayload.source === "factory") {
+        const source = getFactory(dragPayload.factoryId);
+        if (!source) return null;
+        const index = source.pairs.findIndex(/** Handle this UI callback. */function (pair) {
+          return pair.id === dragPayload.pairId;
+        });
+        if (index < 0) return null;
+        const pair = source.pairs.splice(index, 1)[0];
+        if (!source.pairs.length) source.pairs.push(makePair());
+        if (source.activePairId === pair.id) source.activePairId = null;
+        return pair;
+      }
+      const index = looseItems.findIndex(/** Handle this UI callback. */function (item) {
+        return item.id === dragPayload.looseId && item.type === "pair";
+      });
+      if (index < 0) return null;
+      return looseItems.splice(index, 1)[0].pair;
+    }
+    /** Handle this mockup workspace operation. */
+    function movePairToFactory(factoryId, beforePairId = null) {
+      const target = getFactory(factoryId);
+      if (!target || dragPayload?.kind !== "pair") return;
+      if (dragPayload.source === "factory" && dragPayload.factoryId === factoryId && dragPayload.pairId === beforePairId) return;
+      const pair = takeDraggedPair();
+      if (!pair) return;
+      if (beforePairId) {
+        const index = target.pairs.findIndex(/** Handle this UI callback. */function (item) {
+          return item.id === beforePairId;
+        });
+        target.pairs.splice(index < 0 ? target.pairs.length : index, 0, pair);
+      } else {
+        const onlyBlank = target.pairs.length === 1 && !target.pairs[0].base && !target.pairs[0].mask;
+        if (onlyBlank) target.pairs = [pair];else target.pairs.push(pair);
+      }
+      dragPayload = null;
+      renderAll();
+    }
+    /** Handle this mockup workspace operation. */
+    function moveMaskToPair(factoryId, pairId) {
+      const targetFactory = getFactory(factoryId);
+      const target = targetFactory?.pairs.find(/** Handle this UI callback. */function (pair) {
+        return pair.id === pairId;
+      });
+      if (!target || dragPayload?.kind !== "mask") return;
+      if (dragPayload.source === "factory") {
+        const sourceFactory = getFactory(dragPayload.factoryId);
+        const source = sourceFactory?.pairs.find(/** Handle this UI callback. */function (pair) {
+          return pair.id === dragPayload.pairId;
+        });
+        if (!source || sourceFactory.id === targetFactory.id && source.id === target.id) return;
+        const old = target.mask;
+        target.mask = source.mask;
+        source.mask = old;
+      } else {
+        const index = looseItems.findIndex(/** Handle this UI callback. */function (item) {
+          return item.id === dragPayload.looseId && item.type === "mask";
+        });
+        if (index < 0) return;
+        const loose = looseItems[index];
+        const old = target.mask;
+        target.mask = loose.asset;
+        if (old) loose.asset = old;else looseItems.splice(index, 1);
+      }
+      dragPayload = null;
+      renderAll();
+      const error = pairError(target);
+      if (error) showToast(`${targetFactory.name}：${error}`, true);
+    }
+    /** Handle this mockup workspace operation. */
+    function dropDraggedOutside(clientX, clientY) {
+      const point = screenToWorld(clientX, clientY);
+      if (dragPayload?.kind === "pair") {
+        const pair = takeDraggedPair();
+        if (pair) looseItems.push({
+          id: uid("loose"),
+          type: "pair",
+          pair,
+          x: point.x - 90,
+          y: point.y - 70
+        });
+      } else if (dragPayload?.kind === "mask") {
+        if (dragPayload.source === "factory") {
+          const source = getFactory(dragPayload.factoryId);
+          const pair = source?.pairs.find(/** Handle this UI callback. */function (item) {
+            return item.id === dragPayload.pairId;
+          });
+          if (pair?.mask) {
+            looseItems.push({
+              id: uid("loose"),
+              type: "mask",
+              asset: pair.mask,
+              x: point.x - 63,
+              y: point.y - 60
+            });
+            pair.mask = null;
+          }
+        } else {
+          const loose = looseItems.find(/** Handle this UI callback. */function (item) {
+            return item.id === dragPayload.looseId;
+          });
+          if (loose) {
+            loose.x = point.x - 63;
+            loose.y = point.y - 60;
+          }
+        }
+      }
+      dragPayload = null;
+      renderAll();
+    }
+    /** Handle this mockup workspace operation. */
+    function applyFactory(factory) {
+      const errors = blockingErrors(factory);
+      const valid = readyPairs(factory);
+      if (errors.length) return showToast(`${factory.name} 存在尺寸错误`, true);
+      if (!valid.length || !factory.patterns.length) return showToast(`${factory.name} 素材不完整`, true);
+      if (!valid.some(/** Handle this UI callback. */function (pair) {
+        return pair.id === factory.activePairId;
+      })) factory.activePairId = valid[0].id;
+      if (!factory.patterns.some(/** Handle this UI callback. */function (pattern) {
+        return pattern.id === factory.activePatternId;
+      })) {
+        factory.activePatternId = factory.patterns[0].id;
+      }
+      renderAll();
+      showToast(`${factory.name} 已应用，可直接在框内预览调整`);
+    }
+    /** Handle this mockup workspace operation. */
+    function alphaMask(asset) {
+      if (!asset) return null;
+      if (asset.alphaCanvas) return asset.alphaCanvas;
+      const canvas = document.createElement("canvas");
+      canvas.width = asset.width;
+      canvas.height = asset.height;
+      const ctx = canvas.getContext("2d", {
+        willReadFrequently: true
+      });
+      ctx.drawImage(asset.img, 0, 0);
+      const image = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const data = image.data;
+      for (let i = 0; i < data.length; i += 4) {
+        const luminance = Math.round(data[i] * .299 + data[i + 1] * .587 + data[i + 2] * .114);
+        data[i] = data[i + 1] = data[i + 2] = 255;
+        data[i + 3] = luminance;
+      }
+      ctx.putImageData(image, 0, 0);
+      asset.alphaCanvas = canvas;
+      return canvas;
+    }
+    /** Handle this mockup workspace operation. */
+    function patternGeometry(factory, pair, pattern, rect) {
+      const productDiagonal = Math.hypot(pair.base.width, pair.base.height);
+      const patternDiagonal = Math.hypot(pattern.width, pattern.height);
+      const productScale = rect.w / pair.base.width;
+      const scale = factory.transform.size * productDiagonal / patternDiagonal * productScale;
+      return {
+        cx: rect.x + factory.transform.x * rect.w,
+        cy: rect.y + factory.transform.y * rect.h,
+        w: pattern.width * scale,
+        h: pattern.height * scale,
+        scale
+      };
+    }
+    /** Handle this mockup workspace operation. */
+    function rotatePoint(x, y, cx, cy, angle) {
+      const dx = x - cx;
+      const dy = y - cy;
+      const cosine = Math.cos(angle);
+      const sine = Math.sin(angle);
+      return {
+        x: cx + dx * cosine - dy * sine,
+        y: cy + dx * sine + dy * cosine
+      };
+    }
+    /** Handle this mockup workspace operation. */
+    function drawHandles(factory, ctx, geometry) {
+      const angle = factory.transform.rotation;
+      const corners = [rotatePoint(geometry.cx - geometry.w / 2, geometry.cy - geometry.h / 2, geometry.cx, geometry.cy, angle), rotatePoint(geometry.cx + geometry.w / 2, geometry.cy - geometry.h / 2, geometry.cx, geometry.cy, angle), rotatePoint(geometry.cx + geometry.w / 2, geometry.cy + geometry.h / 2, geometry.cx, geometry.cy, angle), rotatePoint(geometry.cx - geometry.w / 2, geometry.cy + geometry.h / 2, geometry.cx, geometry.cy, angle)];
+      ctx.save();
+      ctx.strokeStyle = "#55d69b";
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6, 4]);
+      ctx.beginPath();
+      corners.forEach(/** Handle this UI callback. */function (point, index) {
+        return index ? ctx.lineTo(point.x, point.y) : ctx.moveTo(point.x, point.y);
+      });
+      ctx.closePath();
+      ctx.stroke();
+      ctx.setLineDash([]);
+      corners.forEach(/** Handle this UI callback. */function (point) {
+        ctx.fillStyle = "#fff";
+        ctx.strokeStyle = "#09110e";
+        ctx.lineWidth = 1.5;
+        ctx.fillRect(point.x - 6, point.y - 6, 12, 12);
+        ctx.strokeRect(point.x - 6, point.y - 6, 12, 12);
+      });
+      const top = rotatePoint(geometry.cx, geometry.cy - geometry.h / 2 - 30, geometry.cx, geometry.cy, angle);
+      const edge = rotatePoint(geometry.cx, geometry.cy - geometry.h / 2, geometry.cx, geometry.cy, angle);
+      ctx.strokeStyle = "#55d69b";
+      ctx.beginPath();
+      ctx.moveTo(edge.x, edge.y);
+      ctx.lineTo(top.x, top.y);
+      ctx.stroke();
+      ctx.fillStyle = "#55d69b";
+      ctx.beginPath();
+      ctx.arc(top.x, top.y, 7, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    /** 把数值限制在指定区间内。 */
+    function clampFactoryValue(value, minimum, maximum) {
+      return Math.max(minimum, Math.min(maximum, value));
+    }
+
+    /** 根据当前手动节点生成平滑且不产生亮度过冲的 256 级曲线。 */
+    function buildFactoryCurveLut(factory, pair) {
+      const targetPair = pair || activePair(factory);
+      const effects = targetPair ? ensureTemplateEffects(targetPair) : makeDefaultTemplateEffects();
+      const points = effects.curvePoints;
+      const slopes = [];
+      const tangents = [];
+      const lut = new Uint8ClampedArray(256);
+      let index = 0;
+      let segment = 0;
+      let slopeBefore = 0;
+      let slopeAfter = 0;
+      let spanBefore = 0;
+      let spanAfter = 0;
+      let weightBefore = 0;
+      let weightAfter = 0;
+      let input = 0;
+      let span = 0;
+      let local = 0;
+      let localSquared = 0;
+      let localCubed = 0;
+      let output = 0;
+      for (index = 0; index < points.length - 1; index += 1) {
+        slopes[index] = (points[index + 1].y - points[index].y) / (points[index + 1].x - points[index].x);
+      }
+      tangents[0] = slopes[0];
+      tangents[points.length - 1] = slopes[points.length - 2];
+      for (index = 1; index < points.length - 1; index += 1) {
+        slopeBefore = slopes[index - 1];
+        slopeAfter = slopes[index];
+        if (slopeBefore * slopeAfter <= 0) {
+          tangents[index] = 0;
+        } else {
+          spanBefore = points[index].x - points[index - 1].x;
+          spanAfter = points[index + 1].x - points[index].x;
+          weightBefore = 2 * spanAfter + spanBefore;
+          weightAfter = spanAfter + 2 * spanBefore;
+          tangents[index] = (weightBefore + weightAfter) / (weightBefore / slopeBefore + weightAfter / slopeAfter);
+        }
+      }
+      for (index = 0; index < 256; index += 1) {
+        input = index / 255;
+        if (input <= points[0].x) {
+          lut[index] = Math.round(clampFactoryValue(points[0].y, 0, 1) * 255);
+          continue;
+        }
+        if (input >= points[points.length - 1].x) {
+          lut[index] = Math.round(clampFactoryValue(points[points.length - 1].y, 0, 1) * 255);
+          continue;
+        }
+        while (segment < points.length - 2 && input > points[segment + 1].x) {
+          segment += 1;
+        }
+        span = points[segment + 1].x - points[segment].x;
+        local = (input - points[segment].x) / span;
+        localSquared = local * local;
+        localCubed = localSquared * local;
+        output = (2 * localCubed - 3 * localSquared + 1) * points[segment].y + (localCubed - 2 * localSquared + local) * span * tangents[segment] + (-2 * localCubed + 3 * localSquared) * points[segment + 1].y + (localCubed - localSquared) * span * tangents[segment + 1];
+        lut[index] = Math.round(clampFactoryValue(output, 0, 1) * 255);
+      }
+      effects.curveLut = lut;
+      return lut;
+    }
+
+    /** 根据曲线的实际显示尺寸和设备像素比同步画布像素缓冲区。 */
+    function resizeFactoryCurveCanvas(canvas) {
+      const rect = canvas.getBoundingClientRect();
+      const pixelRatio = Math.max(1, Math.min(3, Number(window.devicePixelRatio) || 1));
+      const width = Math.max(1, Math.round(rect.width * pixelRatio));
+      const height = Math.max(1, Math.round(rect.height * pixelRatio));
+      if (rect.width < 2 || rect.height < 2) return 1;
+      if (canvas.width !== width || canvas.height !== height) {
+        canvas.width = width;
+        canvas.height = height;
+      }
+      return pixelRatio;
+    }
+
+    /** 绘制某个 Factory 的曲线网格、结果线和手动节点。 */
+    function drawFactoryCurve(factory) {
+      const canvas = $(".factory-curve", factory.element);
+      const effects = activeTemplateEffects(factory) || makeDefaultTemplateEffects();
+      if (!canvas) return;
+      const pixelRatio = resizeFactoryCurveCanvas(canvas);
+      const context = canvas.getContext("2d");
+      const lut = effects.curveLut || buildFactoryCurveLut(factory);
+      let index = 0;
+      let x = 0;
+      let y = 0;
+      let point = null;
+      context.clearRect(0, 0, canvas.width, canvas.height);
+      context.fillStyle = "#101010";
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      context.strokeStyle = "#2a2a2a";
+      context.lineWidth = pixelRatio;
+      for (index = 1; index < 4; index += 1) {
+        x = canvas.width * index / 4;
+        y = canvas.height * index / 4;
+        context.beginPath();
+        context.moveTo(x, 0);
+        context.lineTo(x, canvas.height);
+        context.stroke();
+        context.beginPath();
+        context.moveTo(0, y);
+        context.lineTo(canvas.width, y);
+        context.stroke();
+      }
+      context.strokeStyle = "#555";
+      context.setLineDash([4 * pixelRatio, 4 * pixelRatio]);
+      context.beginPath();
+      context.moveTo(0, canvas.height);
+      context.lineTo(canvas.width, 0);
+      context.stroke();
+      context.setLineDash([]);
+      context.strokeStyle = "#55d69b";
+      context.lineWidth = 2 * pixelRatio;
+      context.beginPath();
+      for (index = 0; index < 256; index += 1) {
+        x = index / 255 * canvas.width;
+        y = canvas.height - lut[index] / 255 * canvas.height;
+        if (index === 0) context.moveTo(x, y);else context.lineTo(x, y);
+      }
+      context.stroke();
+      for (index = 0; index < effects.curvePoints.length; index += 1) {
+        point = effects.curvePoints[index];
+        x = point.x * canvas.width;
+        y = canvas.height - point.y * canvas.height;
+        context.fillStyle = "#111";
+        context.strokeStyle = "#fff";
+        context.lineWidth = 1.5 * pixelRatio;
+        context.beginPath();
+        context.arc(x, y, 5.5 * pixelRatio, 0, Math.PI * 2);
+        context.fill();
+        context.stroke();
+      }
+    }
+
+    /** 把曲线画布上的指针位置转换为内部像素坐标。 */
+    function factoryCurvePoint(event) {
+      const canvas = event.currentTarget;
+      const rect = canvas.getBoundingClientRect();
+      return {
+        x: (event.clientX - rect.left) * canvas.width / rect.width,
+        y: (event.clientY - rect.top) * canvas.height / rect.height
+      };
+    }
+
+    /** 返回最接近指针的曲线节点索引。 */
+    function findFactoryCurvePoint(factory, canvas, point, maximumDistance) {
+      const effects = activeTemplateEffects(factory);
+      const rect = canvas.getBoundingClientRect();
+      const pixelScale = rect.width > 0 ? canvas.width / rect.width : 1;
+      let index = 0;
+      let bestIndex = -1;
+      let bestDistance = Infinity;
+      let nodeX = 0;
+      let nodeY = 0;
+      let distance = 0;
+      if (!effects) return -1;
+      for (index = 0; index < effects.curvePoints.length; index += 1) {
+        nodeX = effects.curvePoints[index].x * canvas.width;
+        nodeY = canvas.height - effects.curvePoints[index].y * canvas.height;
+        distance = Math.hypot(point.x - nodeX, point.y - nodeY);
+        if (distance < bestDistance) {
+          bestDistance = distance;
+          bestIndex = index;
+        }
+      }
+      return bestDistance <= maximumDistance * pixelScale ? bestIndex : -1;
+    }
+
+    /** 从 Factory 调整控件读取其所属 Factory。 */
+    function factoryFromAdjustmentControl(control) {
+      const panel = control.closest(".factory-adjustments");
+      return panel ? getFactory(panel.dataset.factoryId) : null;
+    }
+
+    /** 同步左侧位置与缩放控件，使直接拖动预览时数值保持一致。 */
+    function updateFactoryTransformUi(factory) {
+      const panel = $(".transform-panel", factory.element);
+      if (!panel) return;
+      $(".transform-range[data-transform-key='size']", panel).value = String(factory.transform.size);
+      $(".transform-range[data-transform-key='x']", panel).value = String(Math.round(factory.transform.x * 100));
+      $(".transform-range[data-transform-key='y']", panel).value = String(Math.round(factory.transform.y * 100));
+      $(".transform-value[data-transform-key='size']", panel).textContent = `${Math.round(factory.transform.size * 100)}%`;
+      $(".transform-value[data-transform-key='x']", panel).textContent = String(Math.round(factory.transform.x * 100));
+      $(".transform-value[data-transform-key='y']", panel).textContent = String(Math.round(factory.transform.y * 100));
+    }
+
+    /** 处理左侧缩放或位置滑杆的输入并刷新预览。 */
+    function handleFactoryTransformInput(event) {
+      const panel = event.currentTarget.closest(".transform-panel");
+      const factory = panel ? getFactory(panel.dataset.factoryId) : null;
+      const key = event.currentTarget.dataset.transformKey;
+      const value = Number(event.currentTarget.value);
+      if (!factory) return;
+      if (key === "size") factory.transform.size = value;else factory.transform[key] = value / 100;
+      updateFactoryTransformUi(factory);
+      scheduleFactoryPreview(factory, true);
+    }
+
+    /** 为单 Factory 的位置与缩放滑杆绑定交互。 */
+    function bindFactoryTransformControls(factory) {
+      const panel = $(".transform-panel", factory.element);
+      const ranges = panel ? panel.querySelectorAll(".transform-range") : [];
+      let index = 0;
+      for (index = 0; index < ranges.length; index += 1) {
+        ranges[index].addEventListener("input", handleFactoryTransformInput);
+      }
+      updateFactoryTransformUi(factory);
+    }
+
+    /** 合并高频交互重绘，并限制昂贵像素运算的刷新频率。 */
+    function scheduleFactoryPreview(factory, interactive) {
+      const now = window.performance.now();
+      if (interactive && now - factory.lastInteractivePreview < 80) return;
+      if (factory.previewFrame) return;
+      factory.lastInteractivePreview = now;
+      factory.previewFrame = window.requestAnimationFrame(
+      /** 在动画帧中绘制已合并的工作区预览请求。 */
+      function renderScheduledFactoryPreview() {
+        factory.previewFrame = 0;
+        drawPreview(factory);
+      });
+    }
+
+    /** 更新 Factory 调整区的选中、禁用与数值状态。 */
+    function updateFactoryAdjustmentUi(factory) {
+      const panel = $(".factory-adjustments", factory.element);
+      const pair = activePair(factory);
+      const effects = pair ? ensureTemplateEffects(pair) : null;
+      const controlsReady = Boolean(effects && pair?.base && !pairError(pair));
+      let summary = null;
+      if (!panel) return;
+      const buttons = panel.querySelectorAll(".blend-segment");
+      const ranges = panel.querySelectorAll(".displacement-range");
+      let index = 0;
+      panel.classList.toggle("no-template", !controlsReady);
+      for (index = 0; index < buttons.length; index += 1) {
+        buttons[index].disabled = !controlsReady;
+        buttons[index].classList.toggle("active", Boolean(effects) && buttons[index].dataset.blendMode === effects.blendMode);
+      }
+      for (index = 0; index < ranges.length; index += 1) {
+        ranges[index].disabled = !controlsReady || !effects.displacementEnabled;
+        if (effects) {
+          ranges[index].value = String(effects.displacementX);
+        }
+      }
+      $(".reset-curve", panel).disabled = !controlsReady;
+      $(".displacement-toggle", panel).disabled = !controlsReady;
+      $(".factory-curve", panel).setAttribute("aria-disabled", controlsReady ? "false" : "true");
+      $(".adjustment-template-name", panel).textContent = pair?.base ? pair.name : "点击上方模板后调整";
+      $(".adjustment-mode-name", panel).textContent = effects ? `${effects.blendMode === "linear-burn" ? "线性加深" : "正片叠底"} · 产品灰度 × 蒙版区域` : "每个模板独立保存效果";
+      $(".displacement-toggle", panel).checked = effects ? effects.displacementEnabled : false;
+      $(".displacement-value[data-axis='both']", panel).textContent = effects ? String(effects.displacementX) : "—";
+      if (pair && effects) {
+        summary = factory.element.querySelector(`.pair-card[data-pair-id="${pair.id}"] .pair-effect-summary`);
+        if (summary) {
+          summary.textContent = `${effects.blendMode === "linear-burn" ? "线性加深" : "正片叠底"} · ${effects.displacementEnabled ? `置换 ${effects.displacementX}` : "置换关闭"} · 独立曲线`;
+        }
+      }
+    }
+
+    /** 切换某个 Factory 的印花混合模式。 */
+    function handleFactoryBlendClick(event) {
+      const factory = factoryFromAdjustmentControl(event.currentTarget);
+      const effects = factory ? activeTemplateEffects(factory) : null;
+      if (!factory || !effects) return;
+      effects.blendMode = event.currentTarget.dataset.blendMode;
+      updateFactoryAdjustmentUi(factory);
+      scheduleFactoryPreview(factory, false);
+    }
+
+    /** 开关某个 Factory 的灰度置换。 */
+    function handleFactoryDisplacementToggle(event) {
+      const factory = factoryFromAdjustmentControl(event.currentTarget);
+      const effects = factory ? activeTemplateEffects(factory) : null;
+      if (!factory || !effects) return;
+      effects.displacementEnabled = event.currentTarget.checked;
+      updateFactoryAdjustmentUi(factory);
+      scheduleFactoryPreview(factory, false);
+    }
+
+    /** 同步调整某个 Factory 的水平与垂直置换强度。 */
+    function handleFactoryDisplacementInput(event) {
+      const factory = factoryFromAdjustmentControl(event.currentTarget);
+      const effects = factory ? activeTemplateEffects(factory) : null;
+      const value = Number(event.currentTarget.value);
+      if (!factory || !effects) return;
+      effects.displacementX = value;
+      effects.displacementY = value;
+      updateFactoryAdjustmentUi(factory);
+      scheduleFactoryPreview(factory, true);
+    }
+
+    /** 恢复某个 Factory 的默认印花明暗曲线。 */
+    function handleFactoryCurveReset(event) {
+      const factory = factoryFromAdjustmentControl(event.currentTarget);
+      const effects = factory ? activeTemplateEffects(factory) : null;
+      if (!factory || !effects) return;
+      effects.curvePoints = makeDefaultFactoryCurve();
+      effects.curveLut = null;
+      drawFactoryCurve(factory);
+      scheduleFactoryPreview(factory, false);
+    }
+
+    /** 选中曲线节点，或在空白位置添加新节点。 */
+    function handleFactoryCurvePointerDown(event) {
+      const factory = getFactory(event.currentTarget.dataset.factoryId);
+      const effects = factory ? activeTemplateEffects(factory) : null;
+      const point = factoryCurvePoint(event);
+      let index = -1;
+      let insertIndex = 1;
+      let normalizedX = 0;
+      let normalizedY = 0;
+      if (!factory || !effects || event.currentTarget.getAttribute("aria-disabled") === "true") return;
+      index = findFactoryCurvePoint(factory, event.currentTarget, point, 14);
+      if (index < 0) {
+        normalizedX = clampFactoryValue(point.x / event.currentTarget.width, 0.01, 0.99);
+        normalizedY = clampFactoryValue(1 - point.y / event.currentTarget.height, 0, 1);
+        while (insertIndex < effects.curvePoints.length && effects.curvePoints[insertIndex].x < normalizedX) {
+          insertIndex += 1;
+        }
+        effects.curvePoints.splice(insertIndex, 0, {
+          x: normalizedX,
+          y: normalizedY
+        });
+        index = insertIndex;
+        effects.curveLut = null;
+        drawFactoryCurve(factory);
+        scheduleFactoryPreview(factory, true);
+      }
+      effects.curveDragIndex = index;
+      event.currentTarget.setPointerCapture(event.pointerId);
+      event.preventDefault();
+    }
+
+    /** 拖动任意曲线节点，两个端点也允许水平移动。 */
+    function handleFactoryCurvePointerMove(event) {
+      const factory = getFactory(event.currentTarget.dataset.factoryId);
+      const effects = factory ? activeTemplateEffects(factory) : null;
+      const point = factoryCurvePoint(event);
+      let minimumX = 0;
+      let maximumX = 1;
+      let node = null;
+      if (!factory || !effects || effects.curveDragIndex < 0) return;
+      node = effects.curvePoints[effects.curveDragIndex];
+      if (effects.curveDragIndex > 0) {
+        minimumX = effects.curvePoints[effects.curveDragIndex - 1].x + 0.01;
+      }
+      if (effects.curveDragIndex < effects.curvePoints.length - 1) {
+        maximumX = effects.curvePoints[effects.curveDragIndex + 1].x - 0.01;
+      }
+      node.x = clampFactoryValue(point.x / event.currentTarget.width, minimumX, maximumX);
+      node.y = clampFactoryValue(1 - point.y / event.currentTarget.height, 0, 1);
+      effects.curveLut = null;
+      drawFactoryCurve(factory);
+      scheduleFactoryPreview(factory, true);
+      event.preventDefault();
+    }
+
+    /** 完成当前曲线节点拖动并立即刷新最终预览。 */
+    function handleFactoryCurvePointerUp(event) {
+      const factory = getFactory(event.currentTarget.dataset.factoryId);
+      const effects = factory ? activeTemplateEffects(factory) : null;
+      if (!factory || !effects || effects.curveDragIndex < 0) return;
+      effects.curveDragIndex = -1;
+      factory.lastInteractivePreview = 0;
+      scheduleFactoryPreview(factory, false);
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+    }
+
+    /** 双击删除中间曲线节点，首尾节点始终保留。 */
+    function handleFactoryCurveDoubleClick(event) {
+      const factory = getFactory(event.currentTarget.dataset.factoryId);
+      const effects = factory ? activeTemplateEffects(factory) : null;
+      const point = factoryCurvePoint(event);
+      let index = -1;
+      if (!factory || !effects) return;
+      index = findFactoryCurvePoint(factory, event.currentTarget, point, 15);
+      if (index <= 0 || index >= effects.curvePoints.length - 1) return;
+      effects.curvePoints.splice(index, 1);
+      effects.curveLut = null;
+      drawFactoryCurve(factory);
+      scheduleFactoryPreview(factory, false);
+      event.preventDefault();
+    }
+
+    /** 为某个 Factory 绑定一次独立的混合、置换与曲线交互。 */
+    function bindFactoryAdjustments(factory) {
+      const panel = $(".factory-adjustments", factory.element);
+      const buttons = panel.querySelectorAll(".blend-segment");
+      const ranges = panel.querySelectorAll(".displacement-range");
+      const curve = $(".factory-curve", panel);
+      let index = 0;
+      for (index = 0; index < buttons.length; index += 1) {
+        buttons[index].addEventListener("click", handleFactoryBlendClick);
+      }
+      for (index = 0; index < ranges.length; index += 1) {
+        ranges[index].addEventListener("input", handleFactoryDisplacementInput);
+      }
+      $(".displacement-toggle", panel).addEventListener("change", handleFactoryDisplacementToggle);
+      $(".reset-curve", panel).addEventListener("click", handleFactoryCurveReset);
+      curve.addEventListener("pointerdown", handleFactoryCurvePointerDown);
+      curve.addEventListener("pointermove", handleFactoryCurvePointerMove);
+      curve.addEventListener("pointerup", handleFactoryCurvePointerUp);
+      curve.addEventListener("pointercancel", handleFactoryCurvePointerUp);
+      curve.addEventListener("dblclick", handleFactoryCurveDoubleClick);
+      updateFactoryAdjustmentUi(factory);
+      drawFactoryCurve(factory);
+    }
+
+    /** 创建给像素渲染使用的离屏画布。 */
+    function createFactoryRenderCanvas(width, height) {
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      return canvas;
+    }
+
+    /** 使用产品灰度和黑白蒙版生成中性灰以外的置换图。 */
+    function buildFactoryDisplacementMap(context, productData, maskData, width, height) {
+      const output = context.createImageData(width, height);
+      let index = 0;
+      let productGray = 0;
+      let maskGray = 0;
+      let maskFactor = 0;
+      let mapValue = 0;
+      for (index = 0; index < output.data.length; index += 4) {
+        productGray = productData.data[index] * .299 + productData.data[index + 1] * .587 + productData.data[index + 2] * .114;
+        maskGray = maskData.data[index] * .299 + maskData.data[index + 1] * .587 + maskData.data[index + 2] * .114;
+        maskFactor = clampFactoryValue(maskGray * maskData.data[index + 3] / 65025, 0, 1);
+        mapValue = Math.round(128 * (1 - maskFactor) + productGray * maskFactor);
+        output.data[index] = mapValue;
+        output.data[index + 1] = mapValue;
+        output.data[index + 2] = mapValue;
+        output.data[index + 3] = 255;
+      }
+      return output;
+    }
+
+    /** 对印花执行灰度置换、明暗曲线和蒙版裁切。 */
+    function adjustFactoryPrint(factory, pair, context, printData, productData, maskData, width, height) {
+      const effects = ensureTemplateEffects(pair);
+      const output = context.createImageData(width, height);
+      const useDisplacement = effects.displacementEnabled && (effects.displacementX !== 0 || effects.displacementY !== 0);
+      const mapData = useDisplacement ? buildFactoryDisplacementMap(context, productData, maskData, width, height) : null;
+      const scaleX = useDisplacement ? effects.displacementX * width / pair.base.width : 0;
+      const scaleY = useDisplacement ? effects.displacementY * height / pair.base.height : 0;
+      const curveLut = effects.curveLut || buildFactoryCurveLut(factory, pair);
+      let x = 0;
+      let y = 0;
+      let targetIndex = 0;
+      let mapValue = 128;
+      let sourceX = 0;
+      let sourceY = 0;
+      let x0 = 0;
+      let y0 = 0;
+      let x1 = 0;
+      let y1 = 0;
+      let tx = 0;
+      let ty = 0;
+      let topIndexA = 0;
+      let topIndexB = 0;
+      let bottomIndexA = 0;
+      let bottomIndexB = 0;
+      let channel = 0;
+      let topValue = 0;
+      let bottomValue = 0;
+      let luminance = 0;
+      let mappedLuminance = 0;
+      let luminanceRatio = 1;
+      let maskGray = 0;
+      let maskFactor = 0;
+      for (y = 0; y < height; y += 1) {
+        for (x = 0; x < width; x += 1) {
+          targetIndex = (y * width + x) * 4;
+          if (useDisplacement) mapValue = mapData.data[targetIndex];
+          sourceX = clampFactoryValue(x - (mapValue - 128) / 128 * scaleX, 0, width - 1);
+          sourceY = clampFactoryValue(y - (mapValue - 128) / 128 * scaleY, 0, height - 1);
+          x0 = Math.floor(sourceX);
+          y0 = Math.floor(sourceY);
+          x1 = Math.min(width - 1, x0 + 1);
+          y1 = Math.min(height - 1, y0 + 1);
+          tx = sourceX - x0;
+          ty = sourceY - y0;
+          topIndexA = (y0 * width + x0) * 4;
+          topIndexB = (y0 * width + x1) * 4;
+          bottomIndexA = (y1 * width + x0) * 4;
+          bottomIndexB = (y1 * width + x1) * 4;
+          for (channel = 0; channel < 4; channel += 1) {
+            topValue = printData.data[topIndexA + channel] * (1 - tx) + printData.data[topIndexB + channel] * tx;
+            bottomValue = printData.data[bottomIndexA + channel] * (1 - tx) + printData.data[bottomIndexB + channel] * tx;
+            output.data[targetIndex + channel] = Math.round(topValue * (1 - ty) + bottomValue * ty);
+          }
+          luminance = output.data[targetIndex] * .299 + output.data[targetIndex + 1] * .587 + output.data[targetIndex + 2] * .114;
+          mappedLuminance = curveLut[Math.round(clampFactoryValue(luminance, 0, 255))];
+          if (luminance > .001) {
+            luminanceRatio = mappedLuminance / luminance;
+            output.data[targetIndex] = Math.round(clampFactoryValue(output.data[targetIndex] * luminanceRatio, 0, 255));
+            output.data[targetIndex + 1] = Math.round(clampFactoryValue(output.data[targetIndex + 1] * luminanceRatio, 0, 255));
+            output.data[targetIndex + 2] = Math.round(clampFactoryValue(output.data[targetIndex + 2] * luminanceRatio, 0, 255));
+          } else {
+            output.data[targetIndex] = mappedLuminance;
+            output.data[targetIndex + 1] = mappedLuminance;
+            output.data[targetIndex + 2] = mappedLuminance;
+          }
+          maskGray = maskData.data[targetIndex] * .299 + maskData.data[targetIndex + 1] * .587 + maskData.data[targetIndex + 2] * .114;
+          maskFactor = clampFactoryValue(maskGray * maskData.data[targetIndex + 3] / 65025, 0, 1);
+          output.data[targetIndex + 3] = Math.round(output.data[targetIndex + 3] * maskFactor);
+        }
+      }
+      return output;
+    }
+
+    /** 使用正片叠底或线性加深把印花像素合成到产品像素。 */
+    function blendFactoryPixels(pair, context, productData, printData, width, height) {
+      const effects = ensureTemplateEffects(pair);
+      const output = context.createImageData(width, height);
+      let index = 0;
+      let channel = 0;
+      let alpha = 0;
+      let base = 0;
+      let source = 0;
+      let blended = 0;
+      for (index = 0; index < output.data.length; index += 4) {
+        alpha = printData.data[index + 3] / 255;
+        for (channel = 0; channel < 3; channel += 1) {
+          base = productData.data[index + channel];
+          source = printData.data[index + channel];
+          if (effects.blendMode === "linear-burn") blended = Math.max(0, base + source - 255);else blended = base * source / 255;
+          output.data[index + channel] = Math.round(base * (1 - alpha) + blended * alpha);
+        }
+        output.data[index + 3] = productData.data[index + 3];
+      }
+      return output;
+    }
+
+    /** 在指定尺寸内生成一个 Factory 的产品与印花最终合成图。 */
+    function renderFactoryComposite(factory, pair, pattern, width, height) {
+      const productCanvas = createFactoryRenderCanvas(width, height);
+      const maskCanvas = createFactoryRenderCanvas(width, height);
+      const printCanvas = createFactoryRenderCanvas(width, height);
+      const productContext = productCanvas.getContext("2d", {
+        willReadFrequently: true
+      });
+      const maskContext = maskCanvas.getContext("2d", {
+        willReadFrequently: true
+      });
+      const printContext = printCanvas.getContext("2d", {
+        willReadFrequently: true
+      });
+      let geometry = null;
+      let productData = null;
+      let maskData = null;
+      let printData = null;
+      let adjustedPrintData = null;
+      let outputData = null;
+      productContext.imageSmoothingEnabled = true;
+      productContext.imageSmoothingQuality = "high";
+      productContext.drawImage(pair.base.img, 0, 0, width, height);
+      if (!pattern) return productCanvas;
+      if (pair.mask) maskContext.drawImage(pair.mask.img, 0, 0, width, height);else {
+        maskContext.fillStyle = "#fff";
+        maskContext.fillRect(0, 0, width, height);
+      }
+      geometry = patternGeometry(factory, pair, pattern, {
+        x: 0,
+        y: 0,
+        w: width,
+        h: height
+      });
+      printContext.save();
+      printContext.translate(geometry.cx, geometry.cy);
+      printContext.rotate(factory.transform.rotation);
+      printContext.scale(geometry.scale, geometry.scale);
+      printContext.drawImage(pattern.img, -pattern.width / 2, -pattern.height / 2);
+      printContext.restore();
+      productData = productContext.getImageData(0, 0, width, height);
+      maskData = maskContext.getImageData(0, 0, width, height);
+      printData = printContext.getImageData(0, 0, width, height);
+      adjustedPrintData = adjustFactoryPrint(factory, pair, printContext, printData, productData, maskData, width, height);
+      outputData = blendFactoryPixels(pair, productContext, productData, adjustedPrintData, width, height);
+      productContext.putImageData(outputData, 0, 0);
+      return productCanvas;
+    }
+    /** Handle this mockup workspace operation. */
+    function drawPreview(factory) {
+      const canvas = factory.canvas;
+      if (!canvas) return;
+      const ctx = canvas.getContext("2d");
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = "#080c12";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      const pair = activePair(factory);
+      const pattern = activePattern(factory);
+      const name = $(".active-name", factory.element);
+      name.textContent = pair?.base ? pair.name : "尚未使用方案";
+      if (!pair?.base || pairError(pair)) {
+        ctx.fillStyle = "#64758d";
+        ctx.textAlign = "center";
+        ctx.font = "16px Microsoft YaHei";
+        ctx.fillText("请配置印花和产品模板", canvas.width / 2, canvas.height / 2);
+        factory.previewRect = null;
+        return;
+      }
+      const margin = 34;
+      const scale = Math.min((canvas.width - margin * 2) / pair.base.width, (canvas.height - margin * 2) / pair.base.height);
+      const width = pair.base.width * scale;
+      const height = pair.base.height * scale;
+      const rect = {
+        x: (canvas.width - width) / 2,
+        y: (canvas.height - height) / 2,
+        w: width,
+        h: height
+      };
+      const renderWidth = Math.max(1, Math.round(rect.w));
+      const renderHeight = Math.max(1, Math.round(rect.h));
+      factory.previewRect = rect;
+      const composite = renderFactoryComposite(factory, pair, pattern, renderWidth, renderHeight);
+      ctx.drawImage(composite, rect.x, rect.y, rect.w, rect.h);
+      if (!pattern) return;
+      const geometry = patternGeometry(factory, pair, pattern, rect);
+      drawHandles(factory, ctx, geometry);
+    }
+    /** Handle this mockup workspace operation. */
+    function canvasPoint(event, canvas) {
+      const rect = canvas.getBoundingClientRect();
+      return {
+        x: (event.clientX - rect.left) * canvas.width / rect.width,
+        y: (event.clientY - rect.top) * canvas.height / rect.height
+      };
+    }
+    /** Handle this mockup workspace operation. */
+    function hitPattern(factory, point) {
+      const pair = activePair(factory);
+      const pattern = activePattern(factory);
+      if (!pair?.base || !pattern || !factory.previewRect) return null;
+      const geometry = patternGeometry(factory, pair, pattern, factory.previewRect);
+      const local = rotatePoint(point.x, point.y, geometry.cx, geometry.cy, -factory.transform.rotation);
+      const cornerDistance = Math.min(Math.hypot(local.x - (geometry.cx - geometry.w / 2), local.y - (geometry.cy - geometry.h / 2)), Math.hypot(local.x - (geometry.cx + geometry.w / 2), local.y - (geometry.cy - geometry.h / 2)), Math.hypot(local.x - (geometry.cx + geometry.w / 2), local.y - (geometry.cy + geometry.h / 2)), Math.hypot(local.x - (geometry.cx - geometry.w / 2), local.y - (geometry.cy + geometry.h / 2)));
+      const rotationHandle = {
+        x: geometry.cx,
+        y: geometry.cy - geometry.h / 2 - 30
+      };
+      if (Math.hypot(local.x - rotationHandle.x, local.y - rotationHandle.y) < 15) return {
+        type: "rotate",
+        geometry
+      };
+      if (cornerDistance < 15) return {
+        type: "scale",
+        geometry
+      };
+      if (Math.abs(local.x - geometry.cx) <= geometry.w / 2 && Math.abs(local.y - geometry.cy) <= geometry.h / 2) {
+        return {
+          type: "move",
+          geometry
+        };
+      }
+      return null;
+    }
+    /** Handle this mockup workspace operation. */
+    function bindPreview(factory) {
+      factory.canvas.addEventListener("mousedown", /** Handle this UI callback. */function (event) {
+        if (event.button !== 0 || spaceDown) return;
+        const point = canvasPoint(event, factory.canvas);
+        const hit = hitPattern(factory, point);
+        if (!hit) return;
+        event.preventDefault();
+        event.stopPropagation();
+        printDrag = {
+          factoryId: factory.id,
+          ...hit
+        };
+        if (hit.type === "move" && factory.previewRect) {
+          printDrag.dx = (point.x - factory.previewRect.x) / factory.previewRect.w - factory.transform.x;
+          printDrag.dy = (point.y - factory.previewRect.y) / factory.previewRect.h - factory.transform.y;
+        }
+      });
+    }
+    /** Handle this mockup workspace operation. */
+    async function exportFactory(factory) {
+      const errors = blockingErrors(factory);
+      const valid = readyPairs(factory);
+      if (errors.length) return showToast(`${factory.name} 存在尺寸错误，无法导出`, true);
+      if (!valid.length || !factory.patterns.length) return showToast(`${factory.name} 素材不完整`, true);
+      if (typeof JSZip === "undefined") return showToast("JSZip 未加载，请检查网络后刷新", true);
+      const overlay = $("#progress");
+      const fill = $("#progress-fill");
+      const text = $("#progress-text");
+      const percent = $("#progress-percent");
+      const logBox = $("#progress-log");
+      $("#progress-title").textContent = `${factory.name} 正在生成`;
+      overlay.classList.add("show");
+      fill.style.width = "0%";
+      percent.textContent = "0%";
+      logBox.innerHTML = "";
+      const log = /** Handle this UI callback. */function (message) {
+        const line = document.createElement("div");
+        line.textContent = message;
+        logBox.appendChild(line);
+        logBox.scrollTop = logBox.scrollHeight;
+      };
+      try {
+        const zip = new JSZip();
+        const total = valid.length * factory.patterns.length;
+        let done = 0;
+        for (let patternIndex = 0; patternIndex < factory.patterns.length; patternIndex += 1) {
+          const pattern = factory.patterns[patternIndex];
+          const folderName = `${String(patternIndex + 1).padStart(3, "0")}_${zipSafeComponent(stem(pattern.name), "印花", 150)}`;
+          const folder = zip.folder(folderName);
+          log(`创建 ${folderName}/`);
+          for (let pairIndex = 0; pairIndex < valid.length; pairIndex += 1) {
+            const pair = valid[pairIndex];
+            text.textContent = `${folderName} · 模板 ${pairIndex + 1}/${valid.length}`;
+            const output = renderFactoryComposite(factory, pair, pattern, pair.base.width, pair.base.height);
+            const blob = await new Promise(/** Handle this UI callback. */function (resolve) {
+              return output.toBlob(resolve, "image/png");
+            });
+            const filename = `${String(pairIndex + 1).padStart(2, "0")}_${zipSafeComponent(pair.name, "模板", 150)}.png`;
+            folder.file(filename, blob);
+            done += 1;
+            const value = Math.round(done / total * 100);
+            fill.style.width = `${value}%`;
+            percent.textContent = `${value}%`;
+            log(`✓ ${folderName}/${filename}`);
+            await new Promise(/** Handle this UI callback. */function (resolve) {
+              return setTimeout(resolve, 8);
+            });
+          }
+        }
+        text.textContent = "正在压缩 ZIP…";
+        const blob = await zip.generateAsync({
+          type: "blob"
+        });
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.download = `${zipSafeComponent(factory.patternFolderName || "印花", "印花", 120)}_套图.zip`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        setTimeout(/** Handle this UI callback. */function () {
+          return URL.revokeObjectURL(link.href);
+        }, 2000);
+        text.textContent = "导出完成";
+        setTimeout(/** Handle this UI callback. */function () {
+          return overlay.classList.remove("show");
+        }, 900);
+      } catch (error) {
+        overlay.classList.remove("show");
+        showToast(`导出失败：${error.message}`, true);
+      }
+    }
+    /** Handle this mockup workspace operation. */
+    async function makeDemoOptions(name) {
+      const makeCanvas = /** Handle this UI callback. */function () {
+        const canvas = document.createElement("canvas");
+        canvas.width = 600;
+        canvas.height = 600;
+        return canvas;
+      };
+      const base = makeCanvas();
+      const baseCtx = base.getContext("2d");
+      baseCtx.fillStyle = "#fff";
+      baseCtx.fillRect(0, 0, 600, 600);
+      baseCtx.fillStyle = "#eef0f2";
+      baseCtx.fillRect(145, 170, 310, 340);
+      baseCtx.fillRect(75, 225, 70, 72);
+      baseCtx.fillRect(455, 225, 70, 72);
+      baseCtx.fillStyle = "#fff";
+      baseCtx.beginPath();
+      baseCtx.arc(300, 170, 55, 0, Math.PI);
+      baseCtx.fill();
+      const mask = makeCanvas();
+      const maskCtx = mask.getContext("2d");
+      maskCtx.fillStyle = "#000";
+      maskCtx.fillRect(0, 0, 600, 600);
+      maskCtx.fillStyle = "#fff";
+      maskCtx.fillRect(145, 170, 310, 340);
+      maskCtx.fillRect(75, 225, 70, 72);
+      maskCtx.fillRect(455, 225, 70, 72);
+      maskCtx.fillStyle = "#000";
+      maskCtx.beginPath();
+      maskCtx.arc(300, 170, 55, 0, Math.PI);
+      maskCtx.fill();
+      const patternOne = document.createElement("canvas");
+      patternOne.width = patternOne.height = 160;
+      const patternOneCtx = patternOne.getContext("2d");
+      patternOneCtx.fillStyle = name === "T恤工厂" ? "#ff376d" : "#4169e1";
+      patternOneCtx.fillRect(0, 0, 160, 160);
+      patternOneCtx.fillStyle = "#36dda8";
+      [[40, 40], [120, 40], [40, 120], [120, 120]].forEach(/** Handle this UI callback. */function ([x, y]) {
+        patternOneCtx.beginPath();
+        patternOneCtx.arc(x, y, 30, 0, Math.PI * 2);
+        patternOneCtx.fill();
+      });
+      patternOneCtx.fillStyle = "#ffd45f";
+      patternOneCtx.beginPath();
+      patternOneCtx.arc(80, 80, 24, 0, Math.PI * 2);
+      patternOneCtx.fill();
+      const patternTwo = document.createElement("canvas");
+      patternTwo.width = patternTwo.height = 160;
+      const patternTwoCtx = patternTwo.getContext("2d");
+      patternTwoCtx.fillStyle = "#36dda8";
+      patternTwoCtx.fillRect(0, 0, 160, 160);
+      patternTwoCtx.fillStyle = "#fff";
+      patternTwoCtx.fillRect(25, 25, 110, 110);
+      patternTwoCtx.fillStyle = "#101620";
+      patternTwoCtx.beginPath();
+      patternTwoCtx.arc(80, 80, 39, 0, Math.PI * 2);
+      patternTwoCtx.fill();
+      const baseAsset = await assetFromCanvas(`${name}_product.png`, base);
+      const maskAsset = await assetFromCanvas(`${name}_mask.png`, mask);
+      const patterns = [await assetFromCanvas(`${name}_flower.png`, patternOne), await assetFromCanvas(`${name}_circle.png`, patternTwo)];
+      const pair = makePair(baseAsset, maskAsset);
+      return {
+        name,
+        patterns,
+        patternFolderName: `${name}印花组`,
+        pairs: [pair, makePair()],
+        activePairId: pair.id,
+        activePatternId: patterns[0].id
+      };
+    }
+    /** Handle this mockup workspace operation. */
+    async function loadDemo() {
+      try {
+        factories = [];
+        looseItems = [];
+        factorySerial = 0;
+        addFactoryAt(0, 0, await makeDemoOptions("毛毯工厂"));
+        focusAll();
+        showToast("已载入演示");
+      } catch (error) {
+        showToast(`演示加载失败：${error.message}`, true);
+      }
+    }
+    $("#factory-template").addEventListener("dragstart", /** Handle this UI callback. */function (event) {
+      dragPayload = {
+        kind: "factory-template"
+      };
+      event.dataTransfer.effectAllowed = "copy";
+      event.dataTransfer.setData("text/plain", "factory-template");
+    });
+    $("#btn-add-factory").addEventListener("click", addFactoryAtViewportCenter);
+    $("#btn-locate-all").addEventListener("click", focusAll);
+    $("#btn-reset-view").addEventListener("click", focusAll);
+    $("#btn-demo").addEventListener("click", loadDemo);
+    $("#folder-input").addEventListener("change", /** Handle this UI callback. */function (event) {
+      if (pendingFolderFactoryId) handleFolder(pendingFolderFactoryId, event.target.files);
+    });
+    $("#slot-input").addEventListener("change", /** Handle this UI callback. */function (event) {
+      const file = event.target.files[0];
+      if (file && pendingSlot) {
+        assignFileToSlot(pendingSlot.factoryId, pendingSlot.pairId, pendingSlot.type, file);
+      }
+    });
+    viewport.addEventListener("dragover", /** Handle this UI callback. */function (event) {
+      event.preventDefault();
+      if (dragPayload?.kind === "factory-template") viewport.classList.add("factory-drag-over");
+    });
+    viewport.addEventListener("dragleave", /** Handle this UI callback. */function (event) {
+      if (!viewport.contains(event.relatedTarget)) viewport.classList.remove("factory-drag-over");
+    });
+    viewport.addEventListener("drop", /** Handle this UI callback. */async function (event) {
+      event.preventDefault();
+      viewport.classList.remove("factory-drag-over");
+      if (dragPayload?.kind === "factory-template" || event.dataTransfer.getData("text/plain") === "factory-template") {
+        const factoryExisted = factories.length > 0;
+        const factory = addFactoryAt(0, 0);
+        dragPayload = null;
+        showToast(factoryExisted ? "当前仅支持一个工作区" : `${factory.name} 已创建`);
+        return;
+      }
+      if (fixedWorkspace) {
+        dragPayload = null;
+        showToast("请把产品图或蒙版放入右侧模板槽位");
+        return;
+      }
+      if (event.target.closest(".factory,.loose-item")) return;
+      const files = [...event.dataTransfer.files].filter(validImageFile);
+      if (files.length) {
+        try {
+          const asset = await loadFileAsset(files[0]);
+          const point = screenToWorld(event.clientX, event.clientY);
+          looseItems.push({
+            id: uid("loose"),
+            type: "pair",
+            pair: makePair(asset, null),
+            x: point.x - 90,
+            y: point.y - 70
+          });
+          renderAll();
+        } catch (error) {
+          showToast(error.message, true);
+        }
+        return;
+      }
+      if (dragPayload) dropDraggedOutside(event.clientX, event.clientY);
+    });
+    document.addEventListener("dragend", /** Handle this UI callback. */function () {
+      viewport.classList.remove("factory-drag-over");
+      document.querySelectorAll(".drop-ready,.drop-target").forEach(/** Handle this UI callback. */function (el) {
+        return el.classList.remove("drop-ready", "drop-target");
+      });
+      dragPayload = null;
+    });
+    viewport.addEventListener("pointermove", /** Handle this UI callback. */function (event) {
+      const rect = viewport.getBoundingClientRect();
+      gridPointer.x = event.clientX - rect.left;
+      gridPointer.y = event.clientY - rect.top;
+      gridPointer.inside = true;
+      scheduleDotGrid();
+    });
+    viewport.addEventListener("pointerleave", /** Handle this UI callback. */function () {
+      gridPointer.inside = false;
+      scheduleDotGrid();
+    });
+    viewport.addEventListener("wheel", /** Handle this UI callback. */function (event) {
+      if (fixedWorkspace) return;
+      event.preventDefault();
+      const rect = viewport.getBoundingClientRect();
+      const screenX = event.clientX - rect.left;
+      const screenY = event.clientY - rect.top;
+      const worldX = (screenX - view.x) / view.zoom;
+      const worldY = (screenY - view.y) / view.zoom;
+      const next = Math.min(8, Math.max(.025, view.zoom * Math.exp(-event.deltaY * .0012)));
+      view.x = screenX - worldX * next;
+      view.y = screenY - worldY * next;
+      view.zoom = next;
+      updateView();
+    }, {
+      passive: false
+    });
+    viewport.addEventListener("mousedown", /** Handle this UI callback. */function (event) {
+      if (fixedWorkspace) return;
+      const interactive = event.target.closest(".factory,.loose-item");
+      if (event.button === 1 || event.button === 0 && (spaceDown || !interactive)) {
+        event.preventDefault();
+        panning = {
+          x: event.clientX - view.x,
+          y: event.clientY - view.y
+        };
+        viewport.style.cursor = "grabbing";
+      } else if (!interactive) {
+        selectedLooseId = null;
+        renderLooseItems();
+      }
+    });
+    window.addEventListener("mousemove", /** Handle this UI callback. */function (event) {
+      if (panning) {
+        view.x = event.clientX - panning.x;
+        view.y = event.clientY - panning.y;
+        updateView();
+      }
+      if (factoryMove) {
+        const factory = getFactory(factoryMove.id);
+        if (factory) {
+          factory.x = factoryMove.originX + (event.clientX - factoryMove.startX) / view.zoom;
+          factory.y = factoryMove.originY + (event.clientY - factoryMove.startY) / view.zoom;
+          if (factory.element) {
+            factory.element.style.left = `${factory.x}px`;
+            factory.element.style.top = `${factory.y}px`;
+          }
+        }
+      }
+      if (printDrag) {
+        const factory = getFactory(printDrag.factoryId);
+        if (!factory?.canvas || !factory.previewRect) return;
+        const point = canvasPoint(event, factory.canvas);
+        if (printDrag.type === "move") {
+          factory.transform.x = Math.max(-1, Math.min(2, (point.x - factory.previewRect.x) / factory.previewRect.w - printDrag.dx));
+          factory.transform.y = Math.max(-1, Math.min(2, (point.y - factory.previewRect.y) / factory.previewRect.h - printDrag.dy));
+        } else if (printDrag.type === "scale") {
+          const distance = Math.hypot(point.x - printDrag.geometry.cx, point.y - printDrag.geometry.cy);
+          const displayProductDiagonal = Math.hypot(factory.previewRect.w, factory.previewRect.h);
+          factory.transform.size = Math.max(.01, Math.min(4, distance * 2 / displayProductDiagonal));
+        } else if (printDrag.type === "rotate") {
+          factory.transform.rotation = Math.atan2(point.y - printDrag.geometry.cy, point.x - printDrag.geometry.cx) + Math.PI / 2;
+        }
+        updateFactoryTransformUi(factory);
+        scheduleFactoryPreview(factory, true);
+      }
+    });
+    window.addEventListener("mouseup", /** Handle this UI callback. */function () {
+      if (printDrag) {
+        const factory = getFactory(printDrag.factoryId);
+        if (factory) scheduleFactoryPreview(factory, false);
+      }
+      panning = null;
+      factoryMove = null;
+      printDrag = null;
+      viewport.style.cursor = "";
+    });
+    window.addEventListener("keydown", /** Handle this UI callback. */function (event) {
+      if (!fixedWorkspace && event.code === "Space" && !["INPUT", "TEXTAREA"].includes(document.activeElement.tagName)) {
+        spaceDown = true;
+        event.preventDefault();
+        viewport.style.cursor = "grab";
+      }
+      if ((event.key === "Delete" || event.key === "Backspace") && selectedLooseId && !["INPUT", "TEXTAREA"].includes(document.activeElement.tagName)) {
+        looseItems = looseItems.filter(/** Handle this UI callback. */function (item) {
+          return item.id !== selectedLooseId;
+        });
+        selectedLooseId = null;
+        renderLooseItems();
+      }
+    });
+    window.addEventListener("keyup", /** Handle this UI callback. */function (event) {
+      if (event.code === "Space") {
+        spaceDown = false;
+        if (!panning) viewport.style.cursor = "";
+      }
+    });
+    window.addEventListener("blur", /** Handle this UI callback. */function () {
+      spaceDown = false;
+      panning = null;
+      factoryMove = null;
+      printDrag = null;
+      viewport.style.cursor = "";
+    });
+    /** 在窗口尺寸变化后刷新视图并按实际尺寸重绘全部曲线。 */
+    function handleWorkspaceResize() {
+      let index = 0;
+      updateView();
+      for (index = 0; index < factories.length; index += 1) {
+        if (factories[index].element) drawFactoryCurve(factories[index]);
+      }
+    }
+
+    window.addEventListener("resize", handleWorkspaceResize);
+    addFactoryAt(0, 0);
+    updateView();
+  </script>
+</body>
+</html>

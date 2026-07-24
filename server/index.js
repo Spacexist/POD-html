@@ -2,13 +2,24 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 
-const { ROOT, RUNTIME_ROOT, getConfig, replaceConfig, publicConfig } = require("./config");
+const {
+  ROOT,
+  RUNTIME_ROOT,
+  getConfig,
+  getElementProductSettings,
+  replaceConfig,
+  saveElementProductSettings,
+  publicConfig
+} = require("./config");
 const store = require("./task-store");
 const { createSseHub } = require("./sse");
 const { createIntake } = require("./intake");
 
 const APP_PATH = path.join(ROOT, "app", "index.html");
 const LOG_PATH = path.join(RUNTIME_ROOT, "logs", "server.log");
+const MOONSHOT_THINKING_TIMEOUT_MS = 10 * 60 * 1000;
+const MOONSHOT_FAST_TIMEOUT_MS = 3 * 60 * 1000;
+const MOONSHOT_403_RETRY_DELAYS_MS = [5000, 15000, 30000];
 const sse = createSseHub();
 const intake = createIntake({ store });
 const INFRINGEMENT_RESPONSE_FORMAT = {
@@ -123,6 +134,16 @@ function publishElementTrace(requestId, stage, message, details = {}) {
     details,
     createdAt: new Date().toISOString()
   });
+}
+
+// 等待 Moonshot 瞬时 403 的下一次重试，避免阻塞其他工作线程。
+function waitForMoonshotRetry(delayMs) {
+  return new Promise(
+    // 计时结束后释放当前请求的重试等待。
+    function resolveMoonshotRetry(resolve) {
+      setTimeout(resolve, delayMs);
+    }
+  );
 }
 
 // 在 Moonshot 流式响应等待期间定时上报连接存活、事件计数和公开输出进度。
@@ -740,6 +761,7 @@ async function extractElements(req, res) {
     });
   }
   const thinkingEnabled = String(req.headers["x-moonshot-thinking"] || "").toLowerCase() === "enabled";
+  const requestTimeoutMs = thinkingEnabled ? MOONSHOT_THINKING_TIMEOUT_MS : MOONSHOT_FAST_TIMEOUT_MS;
   const target = `${moonshot.baseUrl}/chat/completions`;
   const requestBody = {
     model: moonshot.model,
@@ -752,7 +774,7 @@ async function extractElements(req, res) {
         ]
       }
     ],
-    temperature: 0.6,
+    temperature: thinkingEnabled ? 1 : 0.6,
     stream: true
   };
   if (!thinkingEnabled) requestBody.thinking = { type: "disabled" };
@@ -792,14 +814,39 @@ async function extractElements(req, res) {
 
   try {
     const fetchStartedAt = Date.now();
+    let upstream = null;
+    let upstreamErrorRaw = "";
+    let requestAttempt = 0;
     appendServerLog(`[element-extract][${requestId}] 开始请求 Moonshot：${moonshot.baseUrl}/chat/completions`);
-    publishElementTrace(requestId, "moonshot_request_sent", "Moonshot POST 请求已发送，等待 SSE 响应头，超时上限 180 秒");
-    const upstream = await fetch(target, {
-      method: "POST",
-      headers: upstreamHeaders,
-      body: upstreamBody,
-      signal: AbortSignal.timeout(180000)
-    });
+    publishElementTrace(
+      requestId,
+      "moonshot_request_sent",
+      `Moonshot POST 请求已发送，等待 SSE 响应头，超时上限 ${requestTimeoutMs / 1000} 秒`
+    );
+    while (requestAttempt <= MOONSHOT_403_RETRY_DELAYS_MS.length) {
+      requestAttempt += 1;
+      upstreamErrorRaw = "";
+      upstream = await fetch(target, {
+        method: "POST",
+        headers: upstreamHeaders,
+        body: upstreamBody,
+        signal: AbortSignal.timeout(requestTimeoutMs)
+      });
+      if (upstream.status !== 403) break;
+      upstreamErrorRaw = await upstream.text();
+      if (requestAttempt > MOONSHOT_403_RETRY_DELAYS_MS.length) break;
+      const retryDelayMs = MOONSHOT_403_RETRY_DELAYS_MS[requestAttempt - 1];
+      appendServerLog(
+        `[element-extract][${requestId}] Moonshot 第 ${requestAttempt} 次请求返回 HTTP 403，${retryDelayMs}ms 后重试\nBody:\n${responseTextForLog(upstreamErrorRaw)}`
+      );
+      publishElementTrace(
+        requestId,
+        "moonshot_response_retry",
+        `Moonshot 返回 HTTP 403，第 ${requestAttempt} 次请求失败，${retryDelayMs / 1000} 秒后自动重试`,
+        { requestAttempt, retryDelayMs }
+      );
+      await waitForMoonshotRetry(retryDelayMs);
+    }
     const upstreamResponseHeaders = headersToLogObject(upstream.headers);
     publishElementTrace(
       requestId,
@@ -808,7 +855,7 @@ async function extractElements(req, res) {
       sanitizeLogValue(upstreamResponseHeaders)
     );
     if (!upstream.ok) {
-      const errorRaw = await upstream.text();
+      const errorRaw = upstreamErrorRaw || await upstream.text();
       appendServerLog(
         `[element-extract][${requestId}] MOONSHOT HTTP RESPONSE\nStatus: ${upstream.status} ${upstream.statusText}\nHeaders:\n${JSON.stringify(sanitizeLogValue(upstreamResponseHeaders), null, 2)}\nBody:\n${responseTextForLog(errorRaw)}\n正文: ${Buffer.byteLength(errorRaw)} 字节 / 耗时: ${Date.now() - fetchStartedAt}ms`
       );
@@ -966,6 +1013,97 @@ function serveHtml(res) {
   });
 }
 
+// 发送独立的套图生成页面，避免其画布样式和事件影响主页面。
+function serveMockupHtml(res) {
+  try {
+    const data = fs.readFileSync(path.join(ROOT, "app", "mockup.html"));
+    return send(res, 200, data, { "Content-Type": "text/html; charset=utf-8" });
+  } catch (error) {
+    return sendJson(res, 404, { error: { message: "找不到套图生成页面", type: "not_found" } });
+  }
+}
+
+// 发送项目内固定版本的 JSZip，保证套图导出不依赖外部 CDN。
+function serveJsZipScript(res) {
+  try {
+    const data = fs.readFileSync(path.join(ROOT, "app", "vendor", "jszip.min.js"));
+    return send(res, 200, data, { "Content-Type": "text/javascript; charset=utf-8" });
+  } catch (error) {
+    return sendJson(res, 404, { error: { message: "找不到 JSZip 脚本", type: "not_found" } });
+  }
+}
+
+// 将根目录产品配置转换为产品管理弹窗可读取的列表。
+function publicElementProducts(settings = getElementProductSettings()) {
+  const products = [];
+  const names = Object.keys(settings.productPrompts);
+  for (let index = 0; index < names.length; index += 1) {
+    products.push({
+      name: names[index],
+      prompt: settings.productPrompts[names[index]]
+    });
+  }
+  return {
+    ok: true,
+    mode: settings.mode,
+    productName: settings.productName,
+    promptProductOutputModel: settings.promptProductOutputModel,
+    products
+  };
+}
+
+// 新增、修改、删除或选择 Listing 产品，并仅写入根目录 config.json。
+async function handleElementProducts(req, res) {
+  if (req.method === "GET") return sendJson(res, 200, publicElementProducts());
+  try {
+    const payload = await readJsonBody(req, 128 * 1024);
+    const action = String(payload.action || "").trim();
+    const settings = getElementProductSettings();
+    const name = String(payload.name || "").trim().slice(0, 100);
+    const originalName = String(payload.originalName || "").trim().slice(0, 100);
+    const prompt = String(payload.prompt || "").trim().slice(0, 20000);
+    if (action === "create") {
+      if (!name || !prompt) throw new Error("产品名称和 Prompt 不能为空");
+      if (settings.productPrompts[name]) throw new Error(`产品“${name}”已存在`);
+      settings.productPrompts[name] = prompt;
+      settings.productName = name;
+    } else if (action === "update") {
+      if (!originalName || !settings.productPrompts[originalName]) {
+        throw new Error("要修改的产品不存在");
+      }
+      if (!name || !prompt) throw new Error("产品名称和 Prompt 不能为空");
+      if (name !== originalName && settings.productPrompts[name]) {
+        throw new Error(`产品“${name}”已存在`);
+      }
+      delete settings.productPrompts[originalName];
+      settings.productPrompts[name] = prompt;
+      settings.productName = name;
+    } else if (action === "delete") {
+      if (!name || !settings.productPrompts[name]) throw new Error("要删除的产品不存在");
+      if (Object.keys(settings.productPrompts).length <= 1) {
+        throw new Error("至少需要保留一个 Listing 产品");
+      }
+      delete settings.productPrompts[name];
+      const remainingNames = Object.keys(settings.productPrompts);
+      settings.productName = remainingNames[0] || "";
+    } else if (action === "select") {
+      if (!name || !settings.productPrompts[name]) throw new Error("选择的产品不存在");
+      settings.productName = name;
+    } else if (action === "mode") {
+      settings.mode = payload.mode === "product" ? "product" : "affix";
+    } else {
+      throw new Error("不支持的产品配置操作");
+    }
+    const savedSettings = saveElementProductSettings(settings);
+    appendServerLog(`root config product action: ${action} ${name || originalName || savedSettings.mode}`);
+    return sendJson(res, 200, publicElementProducts(savedSettings));
+  } catch (error) {
+    return sendJson(res, 400, {
+      error: { message: error.message, type: "element_product_config_error" }
+    });
+  }
+}
+
 // 从 app 目录发送元素提取模块脚本。
 function serveElementExtractionScript(res) {
   try {
@@ -983,8 +1121,11 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || `${host}:${port}`}`);
   if (req.method === "OPTIONS") return send(res, 204, "");
   if (req.method === "GET" && (url.pathname === "/" || url.pathname === "/beecode-image-batch.html")) return serveHtml(res);
+  if (req.method === "GET" && (url.pathname === "/mockup" || url.pathname === "/mockup/")) return serveMockupHtml(res);
+  if (req.method === "GET" && url.pathname === "/app/vendor/jszip.min.js") return serveJsZipScript(res);
   if (req.method === "GET" && url.pathname === "/app/element-extraction.js") return serveElementExtractionScript(res);
   if ((req.method === "GET" || req.method === "POST") && ["/config", "/api/config"].includes(url.pathname)) return handleConfig(req, res);
+  if ((req.method === "GET" || req.method === "POST") && url.pathname === "/api/element-products") return handleElementProducts(req, res);
   if (req.method === "GET" && ["/health", "/api/health"].includes(url.pathname)) return sendJson(res, 200, publicConfig());
   if (req.method === "GET" && url.pathname === "/api/events") return sse.connect(req, res);
   if (req.method === "POST" && url.pathname === "/api/intake") return handleIntake(req, res, false);
