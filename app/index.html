@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>印花图提取</title>
+  <title>POD 图像工作台</title>
   <style>
     :root {
       --bg: #111111;
@@ -62,31 +62,42 @@
       margin-bottom: 12px;
     }
 
-    h1 {
-      position: relative;
-      margin: 0;
-      padding-bottom: 8px;
-      font-size: 22px;
-      line-height: 1.2;
-      font-weight: 700;
-    }
-
-    h1::after {
-      content: "";
-      position: absolute;
-      left: 0;
-      bottom: 0;
-      width: 62px;
-      height: 2px;
-      background: #6edbd2;
-    }
-
     .title-zone {
       display: flex;
       align-items: center;
       gap: 18px;
       min-width: 0;
     }
+
+    .module-tabs {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 3px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #151515;
+    }
+
+    .module-tab {
+      position: relative;
+      height: 34px;
+      border-color: transparent;
+      background: transparent;
+      color: var(--muted);
+      font-size: 15px;
+      font-weight: 700;
+    }
+
+    .module-tab:hover { color: #ffffff; }
+
+    .module-tab.active {
+      border-color: rgba(255, 122, 61, 0.65);
+      background: rgba(255, 122, 61, 0.16);
+      color: #ffffff;
+    }
+
+    .module-view.hidden, .actions.hidden { display: none; }
 
     .config-line {
       display: flex;
@@ -152,6 +163,21 @@
       width: 140px;
       accent-color: var(--orange);
     }
+
+    .count-control {
+      width: 58px;
+      height: 28px;
+      padding: 0 7px;
+      border: 1px solid #3a3a3a;
+      border-radius: 4px;
+      background: #101010;
+      color: #ffffff;
+      font: 12px/1 Consolas, monospace;
+      text-align: center;
+      outline: none;
+    }
+
+    .count-control:focus { border-color: var(--orange); }
 
     .ratio-buttons {
       display: flex;
@@ -330,6 +356,7 @@
     .preview-box {
       display: grid;
       place-items: center;
+      position: relative;
       width: 260px;
       height: 260px;
       border-radius: 5px;
@@ -357,6 +384,39 @@
     }
     .preview-box.downloadable { cursor: pointer; border: 1px solid rgba(255, 122, 61, 0.55); }
     .preview-box.downloadable:hover { border-color: var(--orange); }
+
+    .output-arrow {
+      position: absolute;
+      top: 50%;
+      z-index: 2;
+      width: 34px;
+      height: 48px;
+      padding: 0;
+      border: 1px solid rgba(255, 255, 255, 0.24);
+      border-radius: 5px;
+      background: rgba(0, 0, 0, 0.68);
+      color: #ffffff;
+      font-size: 24px;
+      line-height: 1;
+      transform: translateY(-50%);
+    }
+
+    .output-arrow:hover { border-color: var(--orange); color: var(--orange); }
+    .output-arrow.prev { left: 8px; }
+    .output-arrow.next { right: 8px; }
+
+    .output-index {
+      position: absolute;
+      right: 8px;
+      bottom: 8px;
+      z-index: 2;
+      padding: 3px 7px;
+      border-radius: 4px;
+      background: rgba(0, 0, 0, 0.72);
+      color: #ffffff;
+      font: 12px/1.2 Consolas, monospace;
+      pointer-events: none;
+    }
 
     .stack { display: grid; gap: 7px; color: var(--text); font-size: 13px; line-height: 1.3; }
     .success { color: var(--green); }
@@ -462,11 +522,252 @@
 
     #files, #jsonFile, #configFile { display: none; }
 
+    .element-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 390px;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    .element-panel {
+      min-width: 0;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--panel);
+      overflow: hidden;
+    }
+
+    .element-panel + .element-panel { margin-top: 12px; }
+
+    .element-panel-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      min-height: 48px;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--line);
+      background: #1d1d1d;
+    }
+
+    .element-panel-head h2 {
+      margin: 0;
+      font-size: 15px;
+    }
+
+    .element-subtitle {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .element-panel-body { padding: 14px; }
+
+    .element-controls {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+
+    .element-folder-name {
+      max-width: 420px;
+      color: var(--blue);
+      font-size: 12px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    #elementFolderInput { display: none; }
+
+    .element-image-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
+      gap: 8px;
+      max-height: 510px;
+      overflow: auto;
+    }
+
+    .element-image-card {
+      margin: 0;
+      border: 1px solid #303030;
+      border-radius: 5px;
+      background: #111111;
+      overflow: hidden;
+    }
+
+    .element-image-card img {
+      display: block;
+      width: 100%;
+      aspect-ratio: 1;
+      object-fit: cover;
+    }
+
+    .element-image-card figcaption {
+      padding: 6px 8px;
+      color: var(--blue);
+      font: 11px/1.3 Consolas, monospace;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .element-empty {
+      display: grid;
+      place-items: center;
+      min-height: 220px;
+      border: 1px dashed #353535;
+      border-radius: 5px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .element-empty.hidden, .element-image-grid.hidden { display: none; }
+
+    .element-field {
+      display: grid;
+      gap: 6px;
+      margin-bottom: 12px;
+    }
+
+    .element-field label {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .element-input, .element-select {
+      width: 100%;
+      height: 34px;
+      border: 1px solid #3a3a3a;
+      border-radius: 5px;
+      background: #101010;
+      color: var(--text);
+      padding: 0 10px;
+      outline: none;
+    }
+
+    .element-input:focus, .element-select:focus { border-color: var(--orange); }
+
+    .element-thinking-toggle {
+      width: 100%;
+      height: 34px;
+    }
+
+    .element-thinking-toggle[aria-pressed="true"] {
+      border-color: var(--orange);
+      background: rgba(255, 108, 55, 0.12);
+      color: #ff8b61;
+    }
+
+    .element-inline-fields {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    .element-run-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 14px;
+    }
+
+    .element-run-actions button { flex: 1; }
+
+    .element-progress {
+      margin-top: 14px;
+    }
+
+    .element-progress-meta {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 7px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .element-progress-track {
+      height: 7px;
+      border-radius: 999px;
+      background: #292929;
+      overflow: hidden;
+    }
+
+    .element-progress-bar {
+      width: 0%;
+      height: 100%;
+      background: var(--orange);
+      transition: width 0.2s ease;
+    }
+
+    .element-result-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .element-result-wrap { overflow-x: auto; }
+
+    .element-result-table {
+      width: 100%;
+      min-width: 920px;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+
+    .element-result-table th, .element-result-table td {
+      padding: 10px 12px;
+      border-right: 1px solid #282828;
+      border-bottom: 1px solid #282828;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    .element-result-table th {
+      background: #1d1d1d;
+      color: #eaf3ff;
+    }
+
+    .element-result-table td[contenteditable="true"] {
+      background: #101010;
+      outline: none;
+    }
+
+    .element-result-table td[contenteditable="true"]:focus {
+      box-shadow: inset 0 0 0 1px var(--orange);
+    }
+
+    .element-status {
+      display: inline-flex;
+      padding: 3px 7px;
+      border-radius: 4px;
+      background: rgba(0, 184, 107, 0.15);
+      color: var(--green);
+    }
+
+    .element-status.pending {
+      background: rgba(255, 98, 93, 0.14);
+      color: var(--red);
+    }
+
+    .element-log {
+      min-height: 130px;
+      max-height: 230px;
+      overflow: auto;
+      margin: 0;
+      color: #aeb8c4;
+      font: 12px/1.55 Consolas, monospace;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
     @media (max-width: 900px) {
       .app { padding: 14px; }
       .head { align-items: flex-start; flex-direction: column; }
       .actions { justify-content: flex-start; }
       .table { overflow-x: auto; }
+      .title-zone { align-items: flex-start; flex-direction: column; }
+      .element-layout { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -474,13 +775,16 @@
   <main class="app">
     <header class="head">
       <div class="title-zone">
-        <h1>印花图提取</h1>
+        <nav class="module-tabs" aria-label="功能模块">
+          <button id="patternRedrawTab" class="module-tab active" type="button">印花重绘</button>
+          <button id="elementExtractionTab" class="module-tab" type="button">元素提取</button>
+        </nav>
         <div class="config-line">
           <button id="pickConfig">配置文件</button>
           <span id="configStatus" class="config-status">配置读取中</span>
         </div>
       </div>
-      <div class="actions">
+      <div id="patternRedrawActions" class="actions">
         <button id="pickFiles" class="primary">上传图片</button>
         <button id="pickJson">导入JSON</button>
         <button id="chooseFolder">下载文件夹</button>
@@ -496,10 +800,12 @@
       </div>
     </header>
 
+    <section id="patternRedrawModule" class="module-view">
     <section class="prompt-wrap">
       <div class="prompt-head">
         <div class="prompt-label">提示词</div>
         <div class="prompt-tools">
+          <label class="option-group">数量 n <input id="imageCount" class="count-control" type="number" min="1" max="4" step="1" value="4" aria-label="默认生成数量"></label>
           <label class="option-group">相似度 <input id="similarity" class="range-control" type="range" min="5" max="100" value="50"><span id="similarityValue">50%</span></label>
           <div class="option-group">比例 <div class="ratio-buttons"><button class="ratio-button active" type="button" data-ratio="1:1">1:1</button><button class="ratio-button" type="button" data-ratio="9:16">9:16</button><button class="ratio-button" type="button" data-ratio="4:3">4:3</button></div></div>
           <button id="fillBlankPrompts">覆盖全部提示词</button>
@@ -542,6 +848,108 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       <button id="nextPage">下一页</button>
       <button id="lastPage">尾页</button>
     </div>
+    </section>
+
+    <section id="elementExtractionModule" class="module-view hidden" aria-label="元素提取模块">
+      <div class="element-layout">
+        <section class="element-panel">
+          <div class="element-panel-head">
+            <div>
+              <h2>图片素材</h2>
+              <span class="element-subtitle">独立选择本机目录，按文件名生成货号</span>
+            </div>
+            <strong id="elementImageCount" class="element-subtitle">0 张</strong>
+          </div>
+          <div class="element-panel-body">
+            <div class="element-controls">
+              <button id="elementChooseFolder" class="primary" type="button">选择图片目录</button>
+              <span id="elementFolderName" class="element-folder-name">尚未选择目录</span>
+              <input id="elementFolderInput" type="file" accept=".png,.jpg,.jpeg,.webp,.bmp,image/*" webkitdirectory directory multiple>
+            </div>
+            <div id="elementEmpty" class="element-empty">请选择包含商品图片的目录</div>
+            <div id="elementImageGrid" class="element-image-grid hidden"></div>
+          </div>
+        </section>
+
+        <aside class="element-panel">
+          <div class="element-panel-head">
+            <div>
+              <h2>提取设置</h2>
+              <span id="elementProviderState" class="element-subtitle">正在读取 shared.moonshot</span>
+            </div>
+          </div>
+          <div class="element-panel-body">
+            <div class="element-inline-fields">
+              <div class="element-field">
+                <label for="elementPrefix">前缀</label>
+                <input id="elementPrefix" class="element-input" type="text" placeholder="干发帽-">
+              </div>
+              <div class="element-field">
+                <label for="elementSuffix">后缀</label>
+                <input id="elementSuffix" class="element-input" type="text" placeholder="-女士">
+              </div>
+            </div>
+            <span class="element-subtitle">提取完成后修改前后缀，失焦时会立即重新组合现有结果</span>
+            <div class="element-field">
+              <label for="elementConcurrency">并发任务（每批 3×3 / 9 张）</label>
+              <select id="elementConcurrency" class="element-select">
+                <option value="1">1</option>
+                <option value="2">2</option>
+                <option value="3" selected>3</option>
+                <option value="4">4</option>
+              </select>
+            </div>
+            <div class="element-field">
+              <label>模型模式</label>
+              <button id="elementThinkingToggle" class="element-thinking-toggle" type="button" aria-pressed="false">不推理 · 快速</button>
+            </div>
+            <div class="element-run-actions">
+              <button id="elementRetry" type="button" disabled>重试未识别</button>
+              <button id="elementRun" class="primary" type="button">开始提取</button>
+            </div>
+            <div class="element-progress">
+              <div class="element-progress-meta">
+                <span id="elementProgressText">等待开始</span>
+                <strong id="elementProgressValue">0%</strong>
+              </div>
+              <div class="element-progress-track"><div id="elementProgressBar" class="element-progress-bar"></div></div>
+            </div>
+          </div>
+        </aside>
+      </div>
+
+      <section class="element-panel">
+        <div class="element-panel-head">
+          <div>
+            <h2>提取结果</h2>
+            <span class="element-subtitle">结果可直接编辑，刷新页面后清空</span>
+          </div>
+          <div class="element-result-actions">
+            <button id="elementSave" type="button" disabled>保存编辑</button>
+            <button id="elementJson" type="button" disabled>导出 JSON</button>
+            <button id="elementExcel" type="button" disabled>导出 Excel</button>
+            <button id="elementRemoveSpaces" type="button" disabled>批量去除空格</button>
+            <button id="elementExportImages" type="button" disabled>导出图片文件夹</button>
+            <button id="elementRetryAll" type="button" disabled>批量重试</button>
+          </div>
+        </div>
+        <div class="element-result-wrap">
+          <table class="element-result-table">
+            <thead>
+              <tr><th>原本编号</th><th>提取元素</th><th>前后缀组合结果</th><th>状态</th><th>操作</th></tr>
+            </thead>
+            <tbody id="elementResultsBody">
+              <tr><td colspan="5">运行提取任务后，结果会显示在这里。</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="element-panel">
+        <div class="element-panel-head"><h2>运行记录</h2></div>
+        <div class="element-panel-body"><pre id="elementLog" class="element-log">等待开始</pre></div>
+      </section>
+    </section>
   </main>
 
   <script>
@@ -551,8 +959,17 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
     const CONFIG_ENDPOINT = "/api/config";
     const TRANSLATE_ENDPOINT = "/translate-listing";
     const INFRINGEMENT_CHECK_ENDPOINT = "/api/infringement-check";
-    const DEFAULT_CONFIG = { baseUrl: "https://beecode.cc", endpoint: "/v1/images/edits", model: "gpt-image-2", size: "1024x1024", concurrency: 3 };
-    let runtimeConfig = { ...DEFAULT_CONFIG };
+    const DEFAULT_CONFIG = {
+      baseUrl: "https://beecode.cc",
+      endpoint: "/v1/images/edits",
+      model: "gpt-image-2",
+      size: "1024x1024",
+      concurrency: 3,
+      n: 4,
+      sizes: { "1:1": "1024x1024", "9:16": "1024x1824", "4:3": "1536x1152" },
+      similarityPrompt: "重要约束：输出图与输入图的主体轮廓、构图和核心图案保持约 {similarity}% 视觉相似度，其余部分进行原创重绘。"
+    };
+    let runtimeConfig = { ...DEFAULT_CONFIG, sizes: { ...DEFAULT_CONFIG.sizes } };
     const PAGE_SIZE = 50;
     const RETRY_DELAY_MS = 3000;
     const MAX_TIMEOUT_RETRIES = 1;
@@ -569,16 +986,26 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       return `${runtimeConfig.baseUrl.replace(/\/$/, "")}${runtimeConfig.endpoint}`;
     }
 
+    // 应用后端公开配置，并为旧配置补齐多图和比例默认值。
     function applyConfigSummary(config) {
+      const configuredSizes = config.sizes && typeof config.sizes === "object" ? config.sizes : {};
       runtimeConfig = {
         baseUrl: (config.baseUrl || DEFAULT_CONFIG.baseUrl).replace(/\/$/, ""),
         endpoint: config.endpoint || DEFAULT_CONFIG.endpoint,
         model: config.model || DEFAULT_CONFIG.model,
         size: config.size || DEFAULT_CONFIG.size,
-        concurrency: Math.max(1, Number(config.concurrency || DEFAULT_CONFIG.concurrency))
+        concurrency: Math.max(1, Number(config.concurrency || DEFAULT_CONFIG.concurrency)),
+        n: Math.max(1, Math.min(4, Math.floor(Number(config.n || DEFAULT_CONFIG.n)))),
+        sizes: {
+          "1:1": configuredSizes["1:1"] || DEFAULT_CONFIG.sizes["1:1"],
+          "9:16": configuredSizes["9:16"] || DEFAULT_CONFIG.sizes["9:16"],
+          "4:3": configuredSizes["4:3"] || DEFAULT_CONFIG.sizes["4:3"]
+        },
+        similarityPrompt: String(config.similarityPrompt || DEFAULT_CONFIG.similarityPrompt)
       };
+      if (el.imageCount) el.imageCount.value = String(runtimeConfig.n);
       const keyText = config.hasKey ? `key ${config.key || "已读取"}` : "未配置 key";
-      el.configStatus.textContent = `${keyText} | ${runtimeConfig.model} | ${runtimeConfig.size} | ${runtimeConfig.concurrency} 并发`;
+      el.configStatus.textContent = `${keyText} | ${runtimeConfig.model} | ${runtimeConfig.n} 张/次 | ${runtimeConfig.concurrency} 并发`;
       el.configStatus.title = `配置源：${config.configPath || config.keySource || "none"}`;
     }
 
@@ -616,6 +1043,65 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
 
     function revokeIfBlob(url) {
       if (url && url.startsWith("blob:")) URL.revokeObjectURL(url);
+    }
+
+    // 返回任务的全部输出 URL，并兼容旧版单图字段。
+    function outputUrlsForItem(item) {
+      if (Array.isArray(item.outputUrls) && item.outputUrls.length) return item.outputUrls;
+      return item.outputUrl ? [item.outputUrl] : [];
+    }
+
+    // 返回任务的全部本地输出 Blob，并兼容旧版单图字段。
+    function outputBlobsForItem(item) {
+      if (Array.isArray(item.outputBlobs) && item.outputBlobs.length) return item.outputBlobs;
+      return item.outputBlob ? [item.outputBlob] : [];
+    }
+
+    // 将当前预览索引限制在任务已有输出范围内。
+    function normalizeOutputIndex(item) {
+      const count = outputUrlsForItem(item).length;
+      if (!count) {
+        item.outputIndex = 0;
+        return 0;
+      }
+      const index = Math.floor(Number(item.outputIndex || 0));
+      item.outputIndex = Math.max(0, Math.min(count - 1, Number.isFinite(index) ? index : 0));
+      return item.outputIndex;
+    }
+
+    // 返回任务当前轮播位置的输出 URL。
+    function currentOutputUrl(item) {
+      const urls = outputUrlsForItem(item);
+      return urls[normalizeOutputIndex(item)] || "";
+    }
+
+    // 释放任务输出使用的所有临时 Blob URL。
+    function revokeItemOutputs(item) {
+      const urls = outputUrlsForItem(item);
+      for (const url of urls) revokeIfBlob(url);
+    }
+
+    // 用一批新 Blob 替换任务输出并重置轮播位置。
+    function replaceItemOutputs(item, blobs) {
+      revokeItemOutputs(item);
+      item.outputBlobs = [];
+      item.outputUrls = [];
+      item.outputTypes = [];
+      for (const blob of blobs) {
+        item.outputBlobs.push(blob);
+        item.outputUrls.push(URL.createObjectURL(blob));
+        item.outputTypes.push(blob.type || "image/png");
+      }
+      item.outputBlob = item.outputBlobs[0] || null;
+      item.outputUrl = item.outputUrls[0] || "";
+      item.outputType = item.outputTypes[0] || "image/png";
+      item.outputIndex = 0;
+    }
+
+    // 生成包含多图序号的下载文件名。
+    function outputFileName(item, index, count) {
+      const suffix = count > 1 ? `-${String(index + 1).padStart(2, "0")}` : "";
+      return `${downloadBaseName(item)}${suffix}.png`;
     }
 
     function fileLabel(item) {
@@ -659,6 +1145,7 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       return `A-${max + 1}`;
     }
 
+    // 将服务端任务状态合并到本地，并兼容旧版单图缓存。
     function applyCachedTask(item, cached) {
       item.id = cached.id;
       item.fileName = cached.fileName || item.fileName;
@@ -675,7 +1162,28 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       item.inputType = cached.inputType || item.inputType;
       item.outputType = cached.outputType || item.outputType;
       item.inputUrl = cacheUrl(cached.inputUrl) || item.inputUrl;
-      item.outputUrl = cacheUrl(cached.outputUrl) || item.outputUrl || "";
+      const cachedOutputUrls = [];
+      if (Array.isArray(cached.outputUrls)) {
+        for (const outputUrl of cached.outputUrls) {
+          const normalizedUrl = cacheUrl(outputUrl);
+          if (normalizedUrl) cachedOutputUrls.push(normalizedUrl);
+        }
+      }
+      if (!cachedOutputUrls.length && cached.outputUrl) cachedOutputUrls.push(cacheUrl(cached.outputUrl));
+      if (cachedOutputUrls.length) {
+        item.outputUrls = cachedOutputUrls;
+        item.outputUrl = cachedOutputUrls[0];
+        item.outputBlobs = [];
+        item.outputBlob = null;
+        item.outputTypes = Array.isArray(cached.outputTypes) ? cached.outputTypes.slice() : [cached.outputType || item.outputType || "image/png"];
+        normalizeOutputIndex(item);
+      } else {
+        item.outputUrls = outputUrlsForItem(item);
+        item.outputBlobs = outputBlobsForItem(item);
+        item.outputUrl = item.outputUrls[0] || "";
+        item.outputBlob = item.outputBlobs[0] || null;
+        normalizeOutputIndex(item);
+      }
       item.retryCount = Number(cached.retryCount || item.retryCount || 0);
       item.retryAt = Number(cached.retryAt || item.retryAt || 0);
       item.cached = true;
@@ -686,7 +1194,7 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       if (!cached || !cached.id) return null;
       let item = state.items.find((entry) => entry.id === cached.id);
       if (!item) {
-        item = { file: null, outputBlob: null };
+        item = { file: null, outputBlob: null, outputBlobs: [], outputUrls: [], outputIndex: 0 };
         state.items.push(item);
       }
       applyCachedTask(item, cached);
@@ -782,7 +1290,10 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       return { queued: "待生成", retry: "等待重试", running: "处理中", done: "已完成", error: "失败" }[status] || status;
     }
 
-    function successCount(item) { return item.status === "done" ? 1 : 0; }
+    // 返回任务已经成功生成并缓存到界面的图片数量。
+    function successCount(item) {
+      return item.status === "done" ? outputUrlsForItem(item).length : 0;
+    }
 
     function isRetryableError(error) {
       const message = error && error.message ? error.message : String(error || "");
@@ -858,6 +1369,7 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       return index >= start && index < end;
     }
 
+    // 将用户选择的图片初始化为可生成的本地任务。
     function addFiles(files) {
       const images = Array.from(files).filter((file) => /^image\/(png|jpe?g|webp)$/i.test(file.type));
       if (!images.length) return;
@@ -870,6 +1382,10 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
           inputUrl: URL.createObjectURL(file),
           outputUrl: "",
           outputBlob: null,
+          outputUrls: [],
+          outputBlobs: [],
+          outputTypes: [],
+          outputIndex: 0,
           sourceCode: "",
           displayCode: nextFallbackDisplayCode(),
           status: "queued",
@@ -1008,6 +1524,7 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       item.file = null;
     }
 
+    // 缓存任务输入图，同时保留本地已有的多图输出状态。
     async function cacheInput(item) {
       if (!item.file) return;
       const form = new FormData();
@@ -1031,7 +1548,23 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       if (!response.ok) throw new Error(text.slice(0, 300));
       const cached = JSON.parse(text);
       const oldInputUrl = item.inputUrl;
-      const keep = { status: item.status, message: item.message, prompt: item.prompt, sourceCode: item.sourceCode, displayCode: item.displayCode, listing: item.listing, errorLog: item.errorLog, logs: item.logs, outputUrl: item.outputUrl, outputType: item.outputType };
+      const keep = {
+        status: item.status,
+        message: item.message,
+        prompt: item.prompt,
+        sourceCode: item.sourceCode,
+        displayCode: item.displayCode,
+        listing: item.listing,
+        errorLog: item.errorLog,
+        logs: item.logs,
+        outputUrl: item.outputUrl,
+        outputUrls: outputUrlsForItem(item).slice(),
+        outputBlob: item.outputBlob,
+        outputBlobs: outputBlobsForItem(item).slice(),
+        outputType: item.outputType,
+        outputTypes: Array.isArray(item.outputTypes) ? item.outputTypes.slice() : [],
+        outputIndex: item.outputIndex
+      };
       applyCachedTask(item, cached);
       item.status = keep.status;
       item.message = keep.message;
@@ -1042,13 +1575,19 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       item.errorLog = keep.errorLog;
       item.logs = keep.logs;
       item.outputUrl = keep.outputUrl;
+      item.outputUrls = keep.outputUrls;
+      item.outputBlob = keep.outputBlob;
+      item.outputBlobs = keep.outputBlobs;
       item.outputType = keep.outputType;
+      item.outputTypes = keep.outputTypes;
+      item.outputIndex = keep.outputIndex;
       revokeIfBlob(oldInputUrl);
       taskLog(item, "已缓存原图");
       render();
     }
 
-    async function cacheStatus(item, outputBlob) {
+    // 缓存任务状态；传入 Blob 数组时一次上传全部生成结果。
+    async function cacheStatus(item, outputBlobs) {
       const form = new FormData();
       form.set("id", item.id);
       form.set("status", item.status);
@@ -1063,27 +1602,40 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       form.set("retryCount", String(item.retryCount || 0));
       form.set("retryAt", String(item.retryAt || 0));
       form.set("logs", JSON.stringify(item.logs || []));
-      if (outputBlob) form.set("output", outputBlob, `${fileLabel(item).replace(/\.[^.]+$/, "")}.png`);
+      let blobs = outputBlobs;
+      if (outputBlobs instanceof Blob) blobs = [outputBlobs];
+      const hasOutputs = Array.isArray(blobs) && blobs.length > 0;
+      if (hasOutputs) {
+        for (let index = 0; index < blobs.length; index += 1) {
+          form.set(`output${index}`, blobs[index], outputFileName(item, index, blobs.length));
+        }
+      }
       const response = await fetch(`${CACHE_ORIGIN}/cache/output`, { method: "POST", body: form });
       const text = await response.text();
       if (!response.ok) throw new Error(text.slice(0, 300));
       const cached = JSON.parse(text);
-      if (!(item.status === "running" && !outputBlob)) applyCachedTask(item, cached);
+      if (!(item.status === "running" && !hasOutputs)) {
+        const oldUrls = outputUrlsForItem(item).slice();
+        applyCachedTask(item, cached);
+        for (const oldUrl of oldUrls) revokeIfBlob(oldUrl);
+      }
     }
 
+    // 从后台恢复任务，并将旧版单图任务升级为统一的多图结构。
     async function loadCachedTasks() {
       const response = await fetch(`${CACHE_ORIGIN}/cache/tasks`);
       const text = await response.text();
       if (!response.ok) throw new Error(text.slice(0, 300));
       const tasks = JSON.parse(text);
-      state.items = tasks.map((task) => {
-        const item = applyCachedTask({ file: null, outputBlob: null }, task);
+      state.items = [];
+      for (const task of tasks) {
+        const item = applyCachedTask({ file: null, outputBlob: null, outputBlobs: [], outputUrls: [], outputIndex: 0 }, task);
         if (item.status === "running") {
           item.status = "queued";
           item.message = "等待生成";
         }
-        return item;
-      });
+        state.items.push(item);
+      }
       render();
     }
 
@@ -1121,6 +1673,7 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       const name = fileLabel(item);
       return new File([blob], name, { type: blob.type || item.inputType || "image/png" });
     }
+    // 渲染当前页任务，并展示每个任务的多图轮播状态。
     function render() {
       const finished = state.items.filter((item) => item.status === "done" || item.status === "error").length;
       el.bar.style.width = state.items.length ? `${Math.round((finished / state.items.length) * 100)}%` : "0%";
@@ -1145,18 +1698,35 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
         const codeText = escapeHtml(itemDisplayCode(item));
         const codeTitle = escapeHtml(item.sourceCode || itemDisplayCode(item) || "");
         const inputName = escapeHtml(previewLabel(item));
-        const outputName = escapeHtml(listingLabel(item) || `${downloadBaseName(item)}.png`);
+        const outputUrls = outputUrlsForItem(item);
+        const outputCount = outputUrls.length;
+        const outputIndex = normalizeOutputIndex(item);
+        const outputUrl = currentOutputUrl(item);
+        const outputName = escapeHtml(outputFileName(item, outputIndex, outputCount || 1));
+        const totalCount = item.status === "done" && outputCount ? outputCount : runtimeConfig.n;
+        const carouselControls = outputCount > 1
+          ? `<button type="button" class="output-arrow prev" data-output-prev="${item.id}" title="上一张" aria-label="上一张">‹</button><button type="button" class="output-arrow next" data-output-next="${item.id}" title="下一张" aria-label="下一张">›</button><span class="output-index">${outputIndex + 1}/${outputCount}</span>`
+          : "";
         row.innerHTML = `
           <div class="td"><span class="code-badge" title="${codeTitle}">${codeText || "--"}</span></div>
           <div class="td"><div class="preview-stack"><div class="preview-box">${item.inputUrl ? `<img src="${item.inputUrl}" alt="input">` : `<span class="empty-preview">等待缓存原图</span>`}</div><div class="preview-name" title="${inputName}">${inputName}</div></div></div>
-          <div class="td"><div class="preview-stack"><div class="preview-box ${item.outputUrl ? "downloadable" : ""}" ${item.outputUrl ? `data-download="${item.id}" title="点击下载生成图"` : ""}>${item.outputUrl ? `<img src="${item.outputUrl}" alt="output">` : `<span class="empty-preview">生成后显示</span>`}</div><div class="preview-name" title="${outputName}">${outputName}</div></div></div>
-          <div class="td"><div class="stack"><div>总数：1</div><div class="${item.status === "done" ? "success" : item.status === "error" ? "failed" : ""}">${item.status === "error" ? "失败：1" : `成功：${successCount(item)}`}</div></div></div>
+          <div class="td"><div class="preview-stack"><div class="preview-box ${outputUrl ? "downloadable" : ""}" ${outputUrl ? `data-download="${item.id}" title="点击下载当前生成图"` : ""}>${outputUrl ? `<img src="${outputUrl}" alt="output ${outputIndex + 1}">` : `<span class="empty-preview">生成后显示</span>`}${carouselControls}</div><div class="preview-name" title="${outputName}">${outputName}</div></div></div>
+          <div class="td"><div class="stack"><div>总数：${totalCount}</div><div class="${item.status === "done" ? "success" : item.status === "error" ? "failed" : ""}">${item.status === "error" ? `失败：${totalCount}` : `成功：${successCount(item)}`}</div></div></div>
           <div class="td prompt-cell"><textarea class="task-prompt" data-prompt="${item.id}">${escapeHtml(itemPrompt)}</textarea></div>
           <div class="td"><div class="stack"><div>创建时间：${escapeHtml(item.createdAt)}</div><div>状态： <span class="status-pill ${statusClass}">${statusText(item.status)}</span></div><div class="muted">${escapeHtml(item.message)}</div>${item.errorLog ? `<details class="error-detail" open><summary>失败日志</summary><pre>${escapeHtml(item.errorLog)}</pre></details>` : ""}<div class="task-log"><div class="task-log-title">任务日志</div><pre>${escapeHtml(logText(item))}</pre></div></div></div>
-          <div class="td"><div class="ops">${item.sourceUrl ? `<button class="text-action" data-refetch="${item.id}">重新获取</button>` : ""}${canGenerate ? `<button class="text-action" data-run="${item.id}">${runText}</button>` : ""}${item.outputUrl ? `<button class="text-action" data-download="${item.id}">下载</button>` : ""}${item.errorLog ? `<button class="text-action" data-copy-error="${item.id}">复制日志</button>` : ""}<button class="text-action" data-delete="${item.id}">删除</button></div></div>
+          <div class="td"><div class="ops">${item.sourceUrl ? `<button class="text-action" data-refetch="${item.id}">重新获取</button>` : ""}${canGenerate ? `<button class="text-action" data-run="${item.id}">${runText}</button>` : ""}${outputUrl ? `<button class="text-action" data-download="${item.id}">下载</button>` : ""}${item.errorLog ? `<button class="text-action" data-copy-error="${item.id}">复制日志</button>` : ""}<button class="text-action" data-delete="${item.id}">删除</button></div></div>
         `;
         el.rows.appendChild(row);
       }
+    }
+
+    // 按环形方式切换任务当前预览图片。
+    function moveOutput(item, offset) {
+      const count = outputUrlsForItem(item).length;
+      if (count < 2) return;
+      const current = normalizeOutputIndex(item);
+      item.outputIndex = (current + offset + count) % count;
+      render();
     }
 
     function nextQueuedItem() {
@@ -1228,8 +1798,25 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       return Math.min(100, Math.max(5, Number.isFinite(value) ? value : 50));
     }
 
-    function promptOptionsText() {
-      return `相似度要求：与输入图保持约 ${selectedSimilarity()}% 相似度。\n输出比例：${selectedRatio()}。`;
+    // 返回工具栏中的生成数量，并限制在当前接口允许的 1 到 4 张。
+    function selectedImageCount() {
+      const value = Number(el.imageCount ? el.imageCount.value : runtimeConfig.n);
+      if (!Number.isFinite(value)) return runtimeConfig.n;
+      return Math.max(1, Math.min(4, Math.floor(value)));
+    }
+
+    // 将工具栏数量同步到当前页面运行配置并刷新任务计数。
+    function handleImageCountChange() {
+      const count = selectedImageCount();
+      runtimeConfig.n = count;
+      el.imageCount.value = String(count);
+      render();
+    }
+
+    // 将滑块值注入配置中的强约束提示词模板。
+    function promptOptionsText(similarity) {
+      const value = similarity === undefined ? selectedSimilarity() : similarity;
+      return runtimeConfig.similarityPrompt.replace(/\{similarity\}/g, String(value));
     }
 
     function currentPromptForItem(item) {
@@ -1237,9 +1824,38 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       return (box ? box.value : (item.prompt || "")).trim();
     }
 
-    function buildEffectivePrompt(basePrompt) {
-      return `${String(basePrompt || "").trim()}\n\n${promptOptionsText()}`.trim();
+    // 仅在请求时合并相似度约束，不改写界面中的基础提示词。
+    function buildEffectivePrompt(basePrompt, similarity) {
+      return `${String(basePrompt || "").trim()}\n\n${promptOptionsText(similarity)}`.trim();
     }
+
+    // 根据当前比例选择直接发送给图片编辑接口的 size。
+    function selectedImageSize() {
+      const ratio = selectedRatio();
+      return runtimeConfig.sizes[ratio] || DEFAULT_CONFIG.sizes[ratio];
+    }
+
+    // 将接口返回的一项图片结果转换为可缓存 Blob。
+    async function generatedResultToBlob(item, result, index) {
+      if (result && result.b64_json) {
+        taskLog(item, `第 ${index + 1} 张：接收 Base64 ${result.b64_json.length} chars`);
+        const blob = base64ToBlob(result.b64_json, "image/png");
+        taskLog(item, `第 ${index + 1} 张：Base64 转 Blob 完成 ${formatBytes(blob.size)}`);
+        return blob;
+      }
+      if (result && result.url) {
+        taskLog(item, `第 ${index + 1} 张：收到 URL，开始下载`);
+        const response = await fetch(`${IMAGE_PROXY}${encodeURIComponent(result.url)}`);
+        taskLog(item, `第 ${index + 1} 张：下载返回 HTTP ${response.status}`);
+        if (!response.ok) throw new Error(`下载第 ${index + 1} 张远程图片失败：HTTP ${response.status}`);
+        const blob = await response.blob();
+        taskLog(item, `第 ${index + 1} 张：下载完成 ${formatBytes(blob.size)}`);
+        return blob;
+      }
+      throw new Error(`接口第 ${index + 1} 项没有返回图片`);
+    }
+
+    // 执行单个任务的图片编辑请求并缓存全部返回图片。
     async function runItem(item) {
       if (item.status === "running") return;
       const wasError = item.status === "error";
@@ -1268,15 +1884,20 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       const inputBase64 = await fileToBase64Info(runFile);
       taskLog(item, `转换 Base64：完成 ${inputBase64.mime} / ${formatBytes(inputBase64.bytes)} / ${inputBase64.chars} chars`);
 
-      const prompt = buildEffectivePrompt(item.prompt);
-      taskLog(item, `提示词配置：相似度 ${selectedSimilarity()}% / 比例 ${selectedRatio()}`);
+      const similarity = selectedSimilarity();
+      const ratio = selectedRatio();
+      const size = selectedImageSize();
+      const imageCount = selectedImageCount();
+      const prompt = buildEffectivePrompt(item.prompt, similarity);
+      taskLog(item, `提示词配置：相似度 ${similarity}%（已注入请求）`);
+      taskLog(item, `图片配置：比例 ${ratio} / size ${size} / n ${imageCount}`);
       const form = new FormData();
       form.set("model", runtimeConfig.model);
       form.set("prompt", prompt);
-      form.set("size", runtimeConfig.size);
-      form.set("n", "1");
+      form.set("size", size);
+      form.set("n", String(imageCount));
       form.set("image", runFile, fileLabel(item));
-      taskLog(item, `组装 request：model=${runtimeConfig.model} size=${runtimeConfig.size} prompt=${prompt.length} chars image=multipart`);
+      taskLog(item, `组装 request：model=${runtimeConfig.model} size=${size} n=${imageCount} prompt=${prompt.length} chars image=multipart`);
 
       item.message = "请求图片中转";
       render();
@@ -1297,34 +1918,29 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       catch { throw new Error(`接口返回不是 JSON：${text.slice(0, 300)}`); }
       taskLog(item, "解析 JSON：成功");
 
-      const first = payload.data && payload.data[0];
-      let blob;
-      if (first && first.b64_json) {
-        taskLog(item, `接收 Base64 返回：b64_json ${first.b64_json.length} chars`);
-        taskLog(item, "Base64 转图片 Blob：开始");
-        blob = base64ToBlob(first.b64_json, "image/png");
-        taskLog(item, `Base64 转图片 Blob：完成 ${formatBytes(blob.size)}`);
-      } else if (first && first.url) {
-        taskLog(item, "接收返回：未给 b64_json，收到 URL，开始下载图片");
-        const img = await fetch(`${IMAGE_PROXY}${encodeURIComponent(first.url)}`);
-        taskLog(item, `下载远程图片返回：HTTP ${img.status}`);
-        if (!img.ok) throw new Error(`下载远程图片失败：HTTP ${img.status}`);
-        blob = await img.blob();
-        taskLog(item, `下载远程图片完成：${formatBytes(blob.size)}`);
-      } else {
+      const results = Array.isArray(payload.data) ? payload.data : [];
+      if (!results.length) {
         throw new Error(`接口没有返回图片：${text.slice(0, 300)}`);
       }
+      const blobs = [];
+      const resultCount = Math.min(results.length, imageCount);
+      for (let index = 0; index < resultCount; index += 1) {
+        blobs.push(await generatedResultToBlob(item, results[index], index));
+      }
+      taskLog(item, `图片结果解析完成：${blobs.length}/${imageCount}`);
 
-      revokeIfBlob(item.outputUrl);
-      item.outputBlob = blob;
-      item.outputUrl = URL.createObjectURL(blob);
+      replaceItemOutputs(item, blobs);
       item.status = "done";
       item.message = "生成完成";
       item.errorLog = "";
       item.retryCount = 0;
       item.retryAt = 0;
       taskLog(item, "渲染预览：完成");
-      await cacheStatus(item, blob).catch((error) => taskLog(item, `缓存输出失败：${error.message}`));
+      try {
+        await cacheStatus(item, blobs);
+      } catch (error) {
+        taskLog(item, `缓存输出失败：${error.message}`);
+      }
       taskLog(item, "缓存输出：完成");
     }
 
@@ -1448,23 +2064,28 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
         el.translateEnglish.disabled = false;
       }
     }
-    async function outputBlobForDownload(item) {
-      if (item.outputBlob) return item.outputBlob;
-      if (!item.outputUrl) return null;
-      const response = await fetch(item.outputUrl);
+    // 读取指定索引的本地或后台缓存输出图。
+    async function outputBlobForDownload(item, index) {
+      const blobs = outputBlobsForItem(item);
+      if (blobs[index]) return blobs[index];
+      const urls = outputUrlsForItem(item);
+      if (!urls[index]) return null;
+      const response = await fetch(urls[index]);
       if (!response.ok) throw new Error(`读取生成图失败：HTTP ${response.status}`);
       return response.blob();
     }
 
-    async function downloadItem(item) {
-      if (!item || !item.outputUrl) return false;
+    // 将任务指定索引的图片写入用户选择的下载目录。
+    async function downloadItemOutput(item, index) {
+      if (!item) return false;
+      const urls = outputUrlsForItem(item);
+      if (!urls[index]) return false;
       if (!state.downloadDir) {
         alert("请先点击 下载文件夹 选择保存位置。");
         return false;
       }
-      const blob = await outputBlobForDownload(item);
-      const baseName = downloadBaseName(item);
-      const fileName = `${baseName}.png`;
+      const blob = await outputBlobForDownload(item, index);
+      const fileName = outputFileName(item, index, urls.length);
       const handle = await state.downloadDir.getFileHandle(fileName, { create: true });
       const writable = await handle.createWritable();
       await writable.write(blob);
@@ -1473,6 +2094,13 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       return true;
     }
 
+    // 下载当前轮播位置显示的单张图片。
+    async function downloadItem(item) {
+      if (!item) return false;
+      return downloadItemOutput(item, normalizeOutputIndex(item));
+    }
+
+    // 下载当前页所有已完成任务的全部返回图片。
     async function downloadCurrentPage() {
       if (!state.downloadDir) {
         alert("请先点击 下载文件夹 选择保存位置。");
@@ -1480,19 +2108,30 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       }
       const { start, end } = pageRange();
       const pageItems = state.items.slice(start, end);
-      const targets = pageItems.filter((item) => item.outputUrl && item.status === "done");
-      if (!targets.length) return alert("当前页没有可下载的已完成图片。");
+      let downloadableCount = 0;
+      for (const item of pageItems) {
+        if (item.status === "done") downloadableCount += outputUrlsForItem(item).length;
+      }
+      if (!downloadableCount) return alert("当前页没有可下载的已完成图片。");
       let ok = 0;
       let failed = 0;
-      for (const item of targets) {
-        try {
-          if (await downloadItem(item)) ok += 1;
-        } catch (error) {
-          failed += 1;
-          taskLog(item, `下载失败：${error.message}`);
+      let skippedTasks = 0;
+      for (const item of pageItems) {
+        const urls = item.status === "done" ? outputUrlsForItem(item) : [];
+        if (!urls.length) {
+          skippedTasks += 1;
+          continue;
+        }
+        for (let index = 0; index < urls.length; index += 1) {
+          try {
+            if (await downloadItemOutput(item, index)) ok += 1;
+          } catch (error) {
+            failed += 1;
+            taskLog(item, `第 ${index + 1} 张下载失败：${error.message}`);
+          }
         }
       }
-      notice(`下载本页完成：成功 ${ok}，跳过 ${pageItems.length - targets.length}，失败 ${failed}`);
+      notice(`下载本页完成：图片成功 ${ok}，跳过任务 ${skippedTasks}，图片失败 ${failed}`);
     }
 
 
@@ -1585,47 +2224,36 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       }
     }
 
+    // 将合并拼图交给后台保存，并请求 Moonshot 侵权审核。
     async function checkMergedImageForInfringement(canvas, pageItems) {
       setMergeStatus("侵权审核中...");
-      mergeLogToPageItems(pageItems, "侵权审核：上传合并图", true);
+      mergeLogToPageItems(pageItems, "侵权审核：上传合并图并后台保存", true);
       const image = await blobToDataUrl(await contactSheetReviewBlob(canvas));
       const response = await fetch(INFRINGEMENT_CHECK_ENDPOINT, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ image })
+        body: JSON.stringify({ image, page: state.page })
       });
       const raw = await response.text();
       let payload;
       try { payload = JSON.parse(raw); }
       catch { throw new Error(`侵权审核返回不是 JSON：${raw.slice(0, 300)}`); }
-      if (!response.ok) throw new Error(payload.error && payload.error.message ? payload.error.message : raw.slice(0, 300));
+      if (!response.ok) {
+        const message = payload.error && payload.error.message ? payload.error.message : raw.slice(0, 300);
+        const savedText = payload.savedContactSheet ? `；拼图已后台保存至 ${payload.savedContactSheet}` : "";
+        throw new Error(`${message}${savedText}`);
+      }
       const items = Array.isArray(payload.items) ? payload.items : [];
       renderInfringementResults(items);
       for (const riskItem of items) {
         const task = pageItems.find((item) => itemDisplayCode(item) === riskItem.number);
         if (task) taskLog(task, `侵权审核：${riskItem.risk}风险 / ${riskItem.reason}`, { renderNow: false });
       }
-      setMergeStatus(`侵权审核完成：${items.length} 项`);
-      mergeLogToPageItems(pageItems, `侵权审核完成，发现 ${items.length} 项`, true);
+      const savedText = payload.savedContactSheet ? `，已保存 ${payload.savedContactSheet}` : "";
+      setMergeStatus(`侵权审核完成：${items.length} 项${savedText}`);
+      mergeLogToPageItems(pageItems, `侵权审核完成，发现 ${items.length} 项${savedText}`, true);
+      if (payload.savedContactSheet) notice(`侵权拼图已后台保存：${payload.savedContactSheet}`);
       return items;
-    }
-
-    async function saveBlob(blob, fileName) {
-      if (state.downloadDir) {
-        const handle = await state.downloadDir.getFileHandle(fileName, { create: true });
-        const writable = await handle.createWritable();
-        await writable.write(blob);
-        await writable.close();
-        return;
-      }
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = fileName;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
     }
 
     function setMergeStatus(message) {
@@ -1637,6 +2265,7 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       if (renderNow) render();
     }
 
+    // 构建当前页 10×5 标签拼图，并直接提交后台保存和审核。
     async function mergeCurrentPage() {
       if (el.mergePage.disabled) return;
       const { start, end } = pageRange();
@@ -1703,12 +2332,8 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
           if ((i + 1) % 5 === 0 || i === pageItems.length - 1) render();
         }
 
-        setMergeStatus("导出图片...");
-        mergeLogToPageItems(pageItems, "开始导出图片", true);
-        const blob = await canvasToBlob(canvas, "image/jpeg", 0.94);
-        const fileName = cleanFileName(`contact-sheet-page-${state.page}-${new Date().toISOString().replace(/[:.]/g, "-")}.jpg`, "contact-sheet.jpg");
-        setMergeStatus("保存文件...");
-        await saveBlob(blob, fileName);
+        setMergeStatus("准备后台保存与侵权审核...");
+        mergeLogToPageItems(pageItems, "拼图完成，准备后台保存与审核", true);
         try {
           await checkMergedImageForInfringement(canvas, pageItems);
         } catch (error) {
@@ -1717,8 +2342,8 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
           mergeLogToPageItems(pageItems, `侵权审核失败：${error.message}`, true);
           notice(`侵权审核失败：${error.message}`);
         }
-        mergeLogToPageItems(pageItems, `完成，失败 ${failed}，输出 ${fileName}`, true);
-        notice(`合并本页完成：${pageItems.length} 张，失败 ${failed}，输出 ${fileName}`);
+        mergeLogToPageItems(pageItems, `完成，读取失败 ${failed}`, true);
+        notice(`合并本页完成：${pageItems.length} 张，读取失败 ${failed}`);
       } catch (error) {
         setMergeStatus(`失败：${error.message}`);
         mergeLogToPageItems(pageItems, `失败：${error.message}`, true);
@@ -1727,10 +2352,11 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
         el.mergePage.disabled = false;
       }
     }
+    // 删除任务并释放其全部本地预览 URL。
     function deleteItem(item) {
       if (!item) return;
       revokeIfBlob(item.inputUrl);
-      revokeIfBlob(item.outputUrl);
+      revokeItemOutputs(item);
       removeRetryQueue(item);
       state.items = state.items.filter((entry) => entry.id !== item.id);
       clampPage();
@@ -1748,6 +2374,7 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
     el.similarity.addEventListener("input", () => {
       el.similarityValue.textContent = `${selectedSimilarity()}%`;
     });
+    if (el.imageCount) el.imageCount.addEventListener("input", handleImageCountChange);
     document.querySelectorAll("[data-ratio]").forEach((button) => {
       button.addEventListener("click", () => {
         document.querySelectorAll("[data-ratio]").forEach((entry) => entry.classList.toggle("active", entry === button));
@@ -1788,7 +2415,7 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
     el.clear.addEventListener("click", () => {
       for (const item of state.items) {
         revokeIfBlob(item.inputUrl);
-        revokeIfBlob(item.outputUrl);
+        revokeItemOutputs(item);
       }
       state.items = [];
       state.cursor = 0;
@@ -1800,13 +2427,15 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
     });
 
     el.rows.addEventListener("click", (event) => {
-      const target = event.target.closest("[data-refetch], [data-run], [data-download], [data-delete], [data-copy-error]");
+      const target = event.target.closest("[data-refetch], [data-run], [data-download], [data-output-prev], [data-output-next], [data-delete], [data-copy-error]");
       if (!target) return;
-      const id = target.dataset.refetch || target.dataset.run || target.dataset.download || target.dataset.delete || target.dataset.copyError;
+      const id = target.dataset.refetch || target.dataset.run || target.dataset.download || target.dataset.outputPrev || target.dataset.outputNext || target.dataset.delete || target.dataset.copyError;
       const item = state.items.find((entry) => entry.id === id);
       if (!item) return;
       if (target.dataset.refetch) refetchJsonInput(item);
       if (target.dataset.run) runItem(item).catch((error) => { failItem(item, error); }).finally(render);
+      if (target.dataset.outputPrev) moveOutput(item, -1);
+      if (target.dataset.outputNext) moveOutput(item, 1);
       if (target.dataset.download) downloadItem(item).catch((error) => taskLog(item, `下载失败：${error.message}`));
       if (target.dataset.copyError) copyText(item.errorLog || item.message || "").then(() => taskLog(item, "失败日志已复制"));
       if (target.dataset.delete) deleteItem(item);
@@ -1824,5 +2453,7 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
     loadConfig();
     loadCachedTasks().catch((error) => { notice(`恢复缓存失败：${error.message}`); render(); }).finally(connectTaskEvents);
   </script>
+  <script async src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="/app/element-extraction.js"></script>
 </body>
 </html>

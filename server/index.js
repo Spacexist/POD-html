@@ -38,21 +38,222 @@ const INFRINGEMENT_RESPONSE_FORMAT = {
     }
   }
 };
-
 for (const eventName of ["task.created", "task.updated", "task.deleted", "tasks.cleared"]) {
   store.events.on(eventName, (payload) => sse.publish(eventName, payload));
 }
 
+// 将重要后台节点同时写入运行日志和终端，便于定位长时间请求。
 function appendServerLog(message) {
+  const line = `[${new Date().toISOString()}] ${message}`;
   fs.mkdirSync(path.dirname(LOG_PATH), { recursive: true });
-  fs.appendFileSync(LOG_PATH, `[${new Date().toISOString()}] ${message}\n`, "utf8");
+  fs.appendFileSync(LOG_PATH, `${line}\n`, "utf8");
+  console.log(line);
+}
+
+// 递归遮罩日志中的密钥、Cookie 和大型图片 Data URL，同时保留请求结构。
+function sanitizeLogValue(value, keyName = "") {
+  const normalizedKey = String(keyName || "").toLowerCase();
+  if (
+    normalizedKey === "authorization" ||
+    normalizedKey === "cookie" ||
+    normalizedKey === "set-cookie" ||
+    normalizedKey === "apikey" ||
+    normalizedKey === "api_key"
+  ) {
+    return "<已遮罩>";
+  }
+  if (normalizedKey === "reasoning_content" || normalizedKey === "reasoning") {
+    return "<内部推理内容不记录>";
+  }
+  if (typeof value === "string") {
+    const dataUrlMatch = value.match(/^(data:image\/[^;,]+;base64,)([A-Za-z0-9+/=]+)$/i);
+    if (dataUrlMatch) {
+      const encodedLength = dataUrlMatch[2].length;
+      const estimatedBytes = Math.round(encodedLength * 0.75);
+      return `${dataUrlMatch[1]}<base64 ${encodedLength} 字符，约 ${estimatedBytes} 字节>`;
+    }
+    return value;
+  }
+  if (Array.isArray(value)) {
+    const sanitizedArray = [];
+    for (let index = 0; index < value.length; index += 1) {
+      sanitizedArray.push(sanitizeLogValue(value[index], ""));
+    }
+    return sanitizedArray;
+  }
+  if (value && typeof value === "object") {
+    const sanitizedObject = {};
+    const keys = Object.keys(value);
+    for (let index = 0; index < keys.length; index += 1) {
+      const key = keys[index];
+      sanitizedObject[key] = sanitizeLogValue(value[key], key);
+    }
+    return sanitizedObject;
+  }
+  return value;
+}
+
+// 将 Fetch Headers 转换为可序列化对象，便于完整记录响应头。
+function headersToLogObject(headers) {
+  const result = {};
+  const entries = headers.entries();
+  let entry = entries.next();
+  while (!entry.done) {
+    result[entry.value[0]] = entry.value[1];
+    entry = entries.next();
+  }
+  return result;
+}
+
+// 将普通 JSON 响应格式化为安全日志文本，并遮罩可能存在的内部推理字段。
+function responseTextForLog(raw) {
+  try {
+    return JSON.stringify(sanitizeLogValue(JSON.parse(raw)), null, 2);
+  } catch (error) {
+    return String(raw || "");
+  }
+}
+
+// 通过项目现有 SSE 通道向元素提取页面推送后台实时节点。
+function publishElementTrace(requestId, stage, message, details = {}) {
+  sse.publish("element.extraction.trace", {
+    requestId,
+    stage,
+    message,
+    details,
+    createdAt: new Date().toISOString()
+  });
+}
+
+// 在 Moonshot 流式响应等待期间定时上报连接存活、事件计数和公开输出进度。
+function publishMoonshotStreamHeartbeat(state) {
+  if (state.finished) return;
+  const now = Date.now();
+  const elapsedSeconds = Math.floor((now - state.startedAt) / 1000);
+  const idleSeconds = Math.floor((now - state.lastEventAt) / 1000);
+  const stalled = idleSeconds >= 30;
+  const stage = stalled ? "moonshot_stream_stalled" : "moonshot_stream_heartbeat";
+  const prefix = stalled ? "疑似停滞" : "连接正常";
+  publishElementTrace(
+    state.requestId,
+    stage,
+    `${prefix}：已运行 ${elapsedSeconds}s，最近 SSE 事件 ${idleSeconds}s 前，累计 ${state.eventCount} 个事件，公开输出 ${state.contentCharacters} 字符`,
+    {
+      elapsedSeconds,
+      idleSeconds,
+      eventCount: state.eventCount,
+      contentCharacters: state.contentCharacters,
+      reasoningCharacters: state.reasoningCharacters
+    }
+  );
+}
+
+// 读取 Moonshot 的 SSE 响应，将每个已脱敏 data 事件和公开 content 片段实时转发给页面。
+async function readMoonshotSseResponse(upstream, requestId) {
+  if (!upstream.body) throw new Error("Moonshot SSE 响应缺少可读流");
+  const reader = upstream.body.getReader();
+  const decoder = new TextDecoder("utf-8");
+  const safeFrames = [];
+  let buffer = "";
+  let content = "";
+  let reasoningCharacters = 0;
+  let reasoningStarted = false;
+  let finished = false;
+  const streamState = {
+    requestId,
+    startedAt: Date.now(),
+    lastEventAt: Date.now(),
+    eventCount: 0,
+    contentCharacters: 0,
+    reasoningCharacters: 0,
+    finished: false
+  };
+  const heartbeatTimer = setInterval(publishMoonshotStreamHeartbeat, 5000, streamState);
+  publishElementTrace(requestId, "moonshot_stream_open", "Moonshot SSE 连接已建立，开始逐条接收 data 事件");
+
+  try {
+    while (!finished) {
+      const readResult = await reader.read();
+      if (readResult.value) {
+        buffer += decoder.decode(readResult.value, { stream: !readResult.done });
+      }
+      if (readResult.done) {
+        buffer += decoder.decode();
+        buffer += "\n";
+        finished = true;
+      }
+
+      let newlineIndex = buffer.indexOf("\n");
+      while (newlineIndex >= 0) {
+        const line = buffer.slice(0, newlineIndex).replace(/\r$/, "");
+        buffer = buffer.slice(newlineIndex + 1);
+        if (line.startsWith("data:")) {
+          const data = line.slice(5).trim();
+          streamState.lastEventAt = Date.now();
+          streamState.eventCount += 1;
+          if (data === "[DONE]") {
+            safeFrames.push("data: [DONE]");
+            publishElementTrace(requestId, "moonshot_stream_done", "Moonshot SSE 已发送完成标记");
+            finished = true;
+          } else if (data) {
+            let eventPayload;
+            try {
+              eventPayload = JSON.parse(data);
+            } catch (error) {
+              safeFrames.push(`data: ${data}`);
+              publishElementTrace(requestId, "moonshot_stream_warning", `收到无法解析的 SSE 数据：${error.message}`);
+              newlineIndex = buffer.indexOf("\n");
+              continue;
+            }
+            const safeEventPayload = sanitizeLogValue(eventPayload);
+            safeFrames.push(`data: ${JSON.stringify(safeEventPayload)}`);
+            const choice = eventPayload.choices && eventPayload.choices[0];
+            const delta = choice && choice.delta ? choice.delta : {};
+            const reasoning = typeof delta.reasoning_content === "string" ? delta.reasoning_content : "";
+            if (reasoning) {
+              reasoningCharacters += reasoning.length;
+              streamState.reasoningCharacters = reasoningCharacters;
+              if (!reasoningStarted) {
+                reasoningStarted = true;
+                publishElementTrace(
+                  requestId,
+                  "moonshot_reasoning",
+                  "模型已进入推理阶段，等待公开 content 输出"
+                );
+              }
+            }
+            if (typeof delta.content === "string" && delta.content) {
+              content += delta.content;
+              streamState.contentCharacters = content.length;
+            }
+          }
+        }
+        newlineIndex = buffer.indexOf("\n");
+      }
+    }
+  } finally {
+    streamState.finished = true;
+    clearInterval(heartbeatTimer);
+  }
+
+  publishElementTrace(
+    requestId,
+    "moonshot_stream_closed",
+    `Moonshot SSE 响应读取完成，公开答案 ${content.length} 字符，共 ${streamState.eventCount} 个事件`,
+    { reasoningCharacters, eventCount: streamState.eventCount }
+  );
+  return {
+    content,
+    reasoningCharacters,
+    safeResponseText: safeFrames.join("\n")
+  };
 }
 
 function send(res, status, body, headers = {}) {
   res.writeHead(status, {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET,POST,DELETE,OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Request-Id, X-Moonshot-Thinking",
     "Access-Control-Allow-Private-Network": "true",
     "Cache-Control": "no-store",
     ...headers
@@ -214,6 +415,36 @@ async function cacheInput(req, res) {
   }
 }
 
+// 判断缓存目录中的文件是否属于指定任务的某一张输出图。
+function isTaskOutputFile(fileName, id) {
+  if (fileName.startsWith(`${id}.`)) return true;
+  if (!fileName.startsWith(`${id}-`)) return false;
+  const remainder = fileName.slice(id.length + 1);
+  return /^\d+\.[^.]+$/.test(remainder);
+}
+
+// 按字段名顺序收集 output0、output1 等多图文件，并兼容旧字段 output。
+function collectOutputFiles(files) {
+  const collected = [];
+  const names = Object.keys(files || {});
+  for (const name of names) {
+    const match = name.match(/^output(\d+)$/);
+    if (match) collected.push({ index: Number(match[1]), file: files[name] });
+  }
+  if (!collected.length && files && files.output) collected.push({ index: 0, file: files.output });
+  for (let left = 0; left < collected.length; left += 1) {
+    for (let right = left + 1; right < collected.length; right += 1) {
+      if (collected[right].index < collected[left].index) {
+        const current = collected[left];
+        collected[left] = collected[right];
+        collected[right] = current;
+      }
+    }
+  }
+  return collected;
+}
+
+// 更新任务状态，并在存在输出文件时一次缓存全部生成图。
 async function cacheOutput(req, res) {
   let body;
   try { body = await readBody(req); }
@@ -237,16 +468,28 @@ async function cacheOutput(req, res) {
       retryAt: Number(parsed.fields.retryAt || 0),
       logs: parseLogs(parsed.fields.logs)
     };
-    const file = parsed.files.output;
-    if (file && file.data.length) {
-      const ext = extFromNameOrType(file.filename || "output.png", file.contentType || "image/png");
-      const outputFile = path.join(store.OUTPUT_DIR, `${id}${ext}`);
+    const files = collectOutputFiles(parsed.files);
+    if (files.length) {
       for (const oldName of fs.readdirSync(store.OUTPUT_DIR)) {
-        if (oldName.startsWith(`${id}.`)) store.removeFile(path.join(store.OUTPUT_DIR, oldName));
+        if (isTaskOutputFile(oldName, id)) store.removeFile(path.join(store.OUTPUT_DIR, oldName));
       }
-      fs.writeFileSync(outputFile, file.data);
-      update.outputFile = outputFile;
-      update.outputType = file.contentType || "image/png";
+      const outputFiles = [];
+      const outputTypes = [];
+      for (let index = 0; index < files.length; index += 1) {
+        const file = files[index].file;
+        if (!file || !file.data.length) continue;
+        const ext = extFromNameOrType(file.filename || `output-${index + 1}.png`, file.contentType || "image/png");
+        const outputFile = path.join(store.OUTPUT_DIR, `${id}-${index + 1}${ext}`);
+        fs.writeFileSync(outputFile, file.data);
+        outputFiles.push(outputFile);
+        outputTypes.push(file.contentType || "image/png");
+      }
+      if (outputFiles.length) {
+        update.outputFiles = outputFiles;
+        update.outputTypes = outputTypes;
+        update.outputFile = outputFiles[0];
+        update.outputType = outputTypes[0];
+      }
     }
     return sendJson(res, 200, store.publicTask(store.upsert(update)));
   } catch (error) {
@@ -255,37 +498,50 @@ async function cacheOutput(req, res) {
   }
 }
 
-function sendCachedFile(res, kind, id) {
+// 发送任务的输入图或指定索引的输出图。
+function sendCachedFile(res, kind, id, url) {
   const task = store.findById(id);
   if (!task) return sendJson(res, 404, { error: { message: "缓存任务不存在" } });
-  const filePath = kind === "input" ? task.inputFile : task.outputFile;
-  const type = kind === "input" ? task.inputType : task.outputType;
+  let filePath = task.inputFile;
+  let type = task.inputType;
+  if (kind === "output") {
+    const index = Number(url && url.searchParams.get("index") || 0);
+    if (!Number.isInteger(index) || index < 0) return sendJson(res, 400, { error: { message: "输出图片索引无效" } });
+    const outputFiles = store.outputFilesForTask(task);
+    const outputTypes = store.outputTypesForTask(task, outputFiles.length);
+    filePath = outputFiles[index];
+    type = outputTypes[index];
+  }
   if (!filePath || !fs.existsSync(filePath)) return sendJson(res, 404, { error: { message: "缓存文件不存在" } });
   return send(res, 200, fs.readFileSync(filePath), { "Content-Type": type || "application/octet-stream" });
 }
 
+// 删除一个任务及其全部输入、输出缓存文件。
 function deleteTask(res, url) {
   const id = store.safeId(url.searchParams.get("id"));
   if (!id) return sendJson(res, 400, { error: { message: "缺少 id" } });
   const task = store.remove(id);
   if (task) {
     store.removeFile(task.inputFile);
-    store.removeFile(task.outputFile);
+    const outputFiles = store.outputFilesForTask(task);
+    for (const outputFile of outputFiles) store.removeFile(outputFile);
   }
   return sendJson(res, 200, { ok: true });
 }
 
+// 清空任务列表及全部输入、输出缓存文件。
 function clearTasks(res) {
   for (const task of store.list()) {
     store.removeFile(task.inputFile);
-    store.removeFile(task.outputFile);
+    const outputFiles = store.outputFilesForTask(task);
+    for (const outputFile of outputFiles) store.removeFile(outputFile);
   }
   store.clear();
   return sendJson(res, 200, { ok: true });
 }
 
 async function proxyImageEdit(req, res) {
-  const config = getConfig().imageApi;
+  const config = getConfig().patternRedraw.imageApi;
   if (!config.apiKey) {
     return sendJson(res, 500, { error: { message: "runtime/config.json 未配置图片中转 API Key，请点击左上角配置文件导入", type: "proxy_config_error" } });
   }
@@ -325,17 +581,48 @@ function normalizeInfringementItems(value) {
   })).filter((item) => item.number && item.reason);
 }
 
+// 将浏览器生成的侵权审核拼图保存到项目配置的后台目录。
+function saveInfringementContactSheet(image, page) {
+  const config = getConfig().patternRedraw.infringement;
+  if (!config.saveContactSheet) return "";
+  const match = image.match(/^data:image\/(png|jpe?g|webp);base64,([A-Za-z0-9+/=]+)$/i);
+  if (!match) throw new Error("缺少合法的合并图片");
+  const extension = /^jpe?g$/i.test(match[1]) ? ".jpg" : `.${match[1].toLowerCase()}`;
+  const outputDir = path.resolve(ROOT, config.outputDir);
+  const rootPrefix = `${ROOT}${path.sep}`.toLowerCase();
+  if (!outputDir.toLowerCase().startsWith(rootPrefix)) throw new Error("侵权拼图输出目录必须位于项目内");
+  fs.mkdirSync(outputDir, { recursive: true });
+  const pageNumber = Math.max(1, Math.floor(Number(page || 1)));
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const fileName = `contact-sheet-page-${pageNumber}-${timestamp}${extension}`;
+  const filePath = path.join(outputDir, fileName);
+  fs.writeFileSync(filePath, Buffer.from(match[2], "base64"));
+  return path.relative(ROOT, filePath).replace(/\\/g, "/");
+}
+
+// 保存侵权拼图并代理 Moonshot 结构化审核请求。
 async function checkInfringement(req, res) {
-  const config = getConfig().moonshot;
-  if (!config.apiKey) {
-    return sendJson(res, 500, { error: { message: "runtime/config.json 未配置 Moonshot API Key", type: "moonshot_config_error" } });
-  }
+  const fullConfig = getConfig();
+  const config = fullConfig.shared.moonshot;
   let payload;
   try { payload = await readJsonBody(req, 35 * 1024 * 1024); }
   catch (error) { return sendJson(res, 400, { error: { message: error.message, type: "bad_json" } }); }
   const image = String(payload.image || "");
   if (!/^data:image\/(?:png|jpe?g|webp);base64,[A-Za-z0-9+/=]+$/i.test(image)) {
     return sendJson(res, 400, { error: { message: "缺少合法的合并图片", type: "invalid_image" } });
+  }
+  let savedContactSheet = "";
+  try {
+    savedContactSheet = saveInfringementContactSheet(image, payload.page);
+  } catch (error) {
+    appendServerLog(`save infringement contact sheet failed: ${error.message}`);
+    return sendJson(res, 500, { error: { message: error.message, type: "contact_sheet_save_error" } });
+  }
+  if (!config.apiKey) {
+    return sendJson(res, 500, {
+      error: { message: "runtime/config.json 未配置 Moonshot API Key", type: "moonshot_config_error" },
+      savedContactSheet
+    });
   }
   const target = `${config.baseUrl}/chat/completions`;
   const requestBody = {
@@ -363,15 +650,228 @@ async function checkInfringement(req, res) {
       body: JSON.stringify(requestBody)
     });
     const raw = await upstream.text();
-    if (!upstream.ok) return send(res, upstream.status, raw, { "Content-Type": "application/json; charset=utf-8" });
+    if (!upstream.ok) {
+      return sendJson(res, upstream.status, {
+        error: { message: raw.slice(0, 1000), type: "moonshot_upstream_error" },
+        savedContactSheet
+      });
+    }
     const response = JSON.parse(raw);
     const content = response && response.choices && response.choices[0] && response.choices[0].message && response.choices[0].message.content;
     if (!content) throw new Error("Moonshot 未返回审核结果");
     const result = JSON.parse(content);
-    return sendJson(res, 200, { ok: true, items: normalizeInfringementItems(result.items) });
+    return sendJson(res, 200, { ok: true, items: normalizeInfringementItems(result.items), savedContactSheet });
   } catch (error) {
     appendServerLog(`Moonshot infringement check failed: ${error.message}`);
-    return sendJson(res, 502, { error: { message: error.message, type: error.name || "MoonshotProxyError" } });
+    return sendJson(res, 502, {
+      error: { message: error.message, type: error.name || "MoonshotProxyError" },
+      savedContactSheet
+    });
+  }
+}
+
+// 从模型响应文本中解析结构化 JSON，并兼容 Markdown 代码块。
+function parseElementModelJson(content) {
+  let cleaned = String(content || "").trim();
+  if (cleaned.startsWith("```json")) cleaned = cleaned.slice(7);
+  else if (cleaned.startsWith("```")) cleaned = cleaned.slice(3);
+  if (cleaned.endsWith("```")) cleaned = cleaned.slice(0, -3);
+  const parsed = JSON.parse(cleaned.trim());
+  return Array.isArray(parsed) ? { items: parsed } : parsed;
+}
+
+// 清理模型返回的元素结果，并限制单次最多接收九条。
+function normalizeElementItems(value) {
+  const rows = Array.isArray(value) ? value : [];
+  const normalized = [];
+  for (const row of rows) {
+    const id = String(row && row.id || "").trim().replace(/^\[|\]$/g, "").slice(0, 120);
+    const description = String(row && row.description || "").trim().slice(0, 2000);
+    if (id && description) normalized.push({ id, description });
+    if (normalized.length >= 9) break;
+  }
+  return normalized;
+}
+
+// 使用 shared.moonshot 配置代理一组 3×3 拼图的元素提取请求。
+async function extractElements(req, res) {
+  const requestStartedAt = Date.now();
+  const serverTraceId = `element-server-${requestStartedAt}-${Math.floor(Math.random() * 10000)}`;
+  appendServerLog(
+    `[element-extract][${serverTraceId}] HTTP REQUEST\n${req.method} ${req.url}\nHeaders:\n${JSON.stringify(sanitizeLogValue(req.headers), null, 2)}\nBody: <正在读取>`
+  );
+  let payload;
+  try {
+    payload = await readJsonBody(req, 35 * 1024 * 1024);
+  } catch (error) {
+    appendServerLog(`[element-extract][${serverTraceId}] JSON 正文读取失败：${error.message}`);
+    return sendJson(res, 400, { error: { message: error.message, type: "bad_json" }, requestId: serverTraceId });
+  }
+
+  const requestId = String(req.headers["x-request-id"] || serverTraceId)
+    .replace(/[^A-Za-z0-9._-]/g, "")
+    .slice(0, 120) || serverTraceId;
+  const image = String(payload.image || "");
+  appendServerLog(
+    `[element-extract][${requestId}] HTTP REQUEST BODY\n${JSON.stringify(sanitizeLogValue(payload), null, 2)}`
+  );
+  if (!/^data:image\/(?:png|jpe?g|webp);base64,[A-Za-z0-9+/=]+$/i.test(image)) {
+    appendServerLog(`[element-extract][${requestId}] 校验失败：缺少合法的 3×3 拼图`);
+    return sendJson(res, 400, {
+      error: { message: "缺少合法的 3×3 拼图", type: "invalid_image" },
+      requestId
+    });
+  }
+  const prompt = String(payload.prompt || "").trim().slice(0, 20000);
+  if (!prompt) {
+    appendServerLog(`[element-extract][${requestId}] 校验失败：缺少提示词`);
+    return sendJson(res, 400, {
+      error: { message: "缺少提示词", type: "missing_prompt" },
+      requestId
+    });
+  }
+
+  const moonshot = getConfig().shared.moonshot;
+  if (!moonshot.apiKey) {
+    appendServerLog(`[element-extract][${requestId}] 配置校验失败：shared.moonshot.apiKey 未配置`);
+    return sendJson(res, 500, {
+      error: { message: "runtime/config.json 未配置 shared.moonshot.apiKey", type: "moonshot_config_error" },
+      requestId
+    });
+  }
+  const thinkingEnabled = String(req.headers["x-moonshot-thinking"] || "").toLowerCase() === "enabled";
+  const target = `${moonshot.baseUrl}/chat/completions`;
+  const requestBody = {
+    model: moonshot.model,
+    messages: [
+      {
+        role: "user",
+        content: [
+          { type: "text", text: prompt },
+          { type: "image_url", image_url: { url: image } }
+        ]
+      }
+    ],
+    temperature: 0.6,
+    stream: true
+  };
+  if (!thinkingEnabled) requestBody.thinking = { type: "disabled" };
+  const upstreamBody = JSON.stringify(requestBody);
+  const upstreamHeaders = {
+    "Authorization": `Bearer ${moonshot.apiKey}`,
+    "Content-Type": "application/json"
+  };
+  appendServerLog(
+    `[element-extract][${requestId}] MOONSHOT HTTP REQUEST\nPOST ${target}\nHeaders:\n${JSON.stringify(sanitizeLogValue(upstreamHeaders), null, 2)}\nBody:\n${JSON.stringify(sanitizeLogValue(requestBody), null, 2)}\n实际正文: ${Buffer.byteLength(upstreamBody)} 字节`
+  );
+  publishElementTrace(
+    requestId,
+    "moonshot_http_request",
+    `Moonshot 请求已组装：模型 ${moonshot.model}，${thinkingEnabled ? "推理模式" : "不推理快速模式"}，正文 ${Buffer.byteLength(upstreamBody)} 字节`,
+    {
+      method: "POST",
+      url: target,
+      headers: sanitizeLogValue(upstreamHeaders),
+      body: {
+        model: moonshot.model,
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: prompt },
+              { type: "image_url", image_url: { url: sanitizeLogValue(image) } }
+            ]
+          }
+        ],
+        temperature: requestBody.temperature,
+        thinking: requestBody.thinking || { type: "enabled_by_default" },
+        stream: requestBody.stream
+      }
+    }
+  );
+
+  try {
+    const fetchStartedAt = Date.now();
+    appendServerLog(`[element-extract][${requestId}] 开始请求 Moonshot：${moonshot.baseUrl}/chat/completions`);
+    publishElementTrace(requestId, "moonshot_request_sent", "Moonshot POST 请求已发送，等待 SSE 响应头，超时上限 180 秒");
+    const upstream = await fetch(target, {
+      method: "POST",
+      headers: upstreamHeaders,
+      body: upstreamBody,
+      signal: AbortSignal.timeout(180000)
+    });
+    const upstreamResponseHeaders = headersToLogObject(upstream.headers);
+    publishElementTrace(
+      requestId,
+      "moonshot_response_headers",
+      `收到 Moonshot HTTP ${upstream.status} 响应头`,
+      sanitizeLogValue(upstreamResponseHeaders)
+    );
+    if (!upstream.ok) {
+      const errorRaw = await upstream.text();
+      appendServerLog(
+        `[element-extract][${requestId}] MOONSHOT HTTP RESPONSE\nStatus: ${upstream.status} ${upstream.statusText}\nHeaders:\n${JSON.stringify(sanitizeLogValue(upstreamResponseHeaders), null, 2)}\nBody:\n${responseTextForLog(errorRaw)}\n正文: ${Buffer.byteLength(errorRaw)} 字节 / 耗时: ${Date.now() - fetchStartedAt}ms`
+      );
+      appendServerLog(`[element-extract][${requestId}] Moonshot 返回失败状态 HTTP ${upstream.status}`);
+      publishElementTrace(requestId, "moonshot_response_error", `Moonshot 返回 HTTP ${upstream.status}`);
+      return sendJson(res, upstream.status, {
+        error: { message: errorRaw.slice(0, 1200), type: "moonshot_upstream_error" },
+        requestId,
+        elapsedMs: Date.now() - requestStartedAt
+      });
+    }
+    const contentType = upstream.headers.get("content-type") || "";
+    let content = "";
+    let safeResponseText = "";
+    if (contentType.toLowerCase().includes("text/event-stream")) {
+      const streamResult = await readMoonshotSseResponse(upstream, requestId);
+      content = streamResult.content;
+      safeResponseText = streamResult.safeResponseText;
+    } else {
+      const raw = await upstream.text();
+      safeResponseText = responseTextForLog(raw);
+      const response = JSON.parse(raw);
+      appendServerLog(`[element-extract][${requestId}] Moonshot 使用非 SSE 响应，外层 JSON 解析完成`);
+      content = response && response.choices && response.choices[0] &&
+        response.choices[0].message && response.choices[0].message.content;
+      publishElementTrace(requestId, "moonshot_non_stream_response", "Moonshot 返回非 SSE 响应，已按普通 JSON 处理");
+    }
+    appendServerLog(
+      `[element-extract][${requestId}] MOONSHOT HTTP RESPONSE\nStatus: ${upstream.status} ${upstream.statusText}\nHeaders:\n${JSON.stringify(sanitizeLogValue(upstreamResponseHeaders), null, 2)}\nBody:\n${safeResponseText}\n耗时: ${Date.now() - fetchStartedAt}ms`
+    );
+    if (!content) throw new Error("Moonshot 未返回元素提取结果");
+    appendServerLog(`[element-extract][${requestId}] 模型内容已取得：${String(content).length} 字符，开始解析结构化结果`);
+    publishElementTrace(requestId, "result_parse_started", `公开答案接收完成，共 ${String(content).length} 字符，开始解析 JSON`);
+    const parsed = parseElementModelJson(content);
+    appendServerLog(`[element-extract][${requestId}] 模型结构化 JSON 解析完成`);
+    const items = normalizeElementItems(parsed && parsed.items);
+    const elapsedMs = Date.now() - requestStartedAt;
+    publishElementTrace(
+      requestId,
+      "moonshot_final_json",
+      "Moonshot 最终 JSON",
+      { items }
+    );
+    appendServerLog(
+      `[element-extract][${requestId}] 结果规范化完成：返回 ${items.length} 条，总耗时 ${elapsedMs}ms`
+    );
+    publishElementTrace(
+      requestId,
+      "result_complete",
+      `结果处理完成：${items.length} 条，总耗时 ${elapsedMs}ms`
+    );
+    return sendJson(res, 200, { ok: true, items, model: moonshot.model, requestId, elapsedMs });
+  } catch (error) {
+    const elapsedMs = Date.now() - requestStartedAt;
+    appendServerLog(
+      `[element-extract][${requestId}] 请求失败：${error.name || "Error"} ${error.message}，总耗时 ${elapsedMs}ms`
+    );
+    publishElementTrace(requestId, "request_failed", `${error.name || "Error"}：${error.message}`);
+    return sendJson(res, 502, {
+      error: { message: error.message, type: error.name || "MoonshotElementExtractionError" },
+      requestId,
+      elapsedMs
+    });
   }
 }
 
@@ -466,13 +966,24 @@ function serveHtml(res) {
   });
 }
 
+// 从 app 目录发送元素提取模块脚本。
+function serveElementExtractionScript(res) {
+  try {
+    const data = fs.readFileSync(path.join(ROOT, "app", "element-extraction.js"));
+    return send(res, 200, data, { "Content-Type": "text/javascript; charset=utf-8" });
+  } catch (error) {
+    return sendJson(res, 404, { error: { message: "找不到元素提取模块脚本", type: "not_found" } });
+  }
+}
+
 const startupConfig = getConfig();
-const host = startupConfig.server.host;
-const port = startupConfig.server.port;
+const host = startupConfig.shared.server.host;
+const port = startupConfig.shared.server.port;
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || `${host}:${port}`}`);
   if (req.method === "OPTIONS") return send(res, 204, "");
   if (req.method === "GET" && (url.pathname === "/" || url.pathname === "/beecode-image-batch.html")) return serveHtml(res);
+  if (req.method === "GET" && url.pathname === "/app/element-extraction.js") return serveElementExtractionScript(res);
   if ((req.method === "GET" || req.method === "POST") && ["/config", "/api/config"].includes(url.pathname)) return handleConfig(req, res);
   if (req.method === "GET" && ["/health", "/api/health"].includes(url.pathname)) return sendJson(res, 200, publicConfig());
   if (req.method === "GET" && url.pathname === "/api/events") return sse.connect(req, res);
@@ -482,15 +993,16 @@ const server = http.createServer(async (req, res) => {
   if (req.method === "GET" && url.pathname === "/proxy-image") return proxyImageDownload(req, res, url);
   if (req.method === "POST" && url.pathname === "/translate-listing") return proxyTranslateListing(req, res);
   if (req.method === "POST" && url.pathname === "/api/infringement-check") return checkInfringement(req, res);
+  if (req.method === "POST" && url.pathname === "/api/element-extract") return extractElements(req, res);
   if (req.method === "GET" && ["/cache/tasks", "/api/tasks"].includes(url.pathname)) return sendJson(res, 200, store.list().map(store.publicTask));
   if (req.method === "POST" && url.pathname === "/cache/input") return cacheInput(req, res);
   if (req.method === "POST" && url.pathname === "/cache/output") return cacheOutput(req, res);
   if (req.method === "DELETE" && url.pathname === "/cache/task") return deleteTask(res, url);
   if (req.method === "DELETE" && url.pathname === "/cache/tasks") return clearTasks(res);
   const inputMatch = url.pathname.match(/^\/cache\/input\/([^/]+)$/);
-  if (req.method === "GET" && inputMatch) return sendCachedFile(res, "input", decodeURIComponent(inputMatch[1]));
+  if (req.method === "GET" && inputMatch) return sendCachedFile(res, "input", decodeURIComponent(inputMatch[1]), url);
   const outputMatch = url.pathname.match(/^\/cache\/output\/([^/]+)$/);
-  if (req.method === "GET" && outputMatch) return sendCachedFile(res, "output", decodeURIComponent(outputMatch[1]));
+  if (req.method === "GET" && outputMatch) return sendCachedFile(res, "output", decodeURIComponent(outputMatch[1]), url);
   if (req.method === "POST" && url.pathname === "/v1/images/edits") return proxyImageEdit(req, res);
   return sendJson(res, 404, { error: { message: "Not found", type: "not_found" } });
 });

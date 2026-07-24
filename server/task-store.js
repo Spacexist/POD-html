@@ -7,12 +7,11 @@ const TASKS_PATH = path.join(RUNTIME_ROOT, "tasks.json");
 const CACHE_ROOT = path.join(RUNTIME_ROOT, "cache");
 const INPUT_DIR = path.join(CACHE_ROOT, "input");
 const OUTPUT_DIR = path.join(CACHE_ROOT, "output");
-const CONTACT_SHEET_DIR = path.join(CACHE_ROOT, "contact-sheets");
 
+// 创建任务和图片缓存所需的运行时目录。
 function ensureRuntime() {
   fs.mkdirSync(INPUT_DIR, { recursive: true });
   fs.mkdirSync(OUTPUT_DIR, { recursive: true });
-  fs.mkdirSync(CONTACT_SHEET_DIR, { recursive: true });
   if (!fs.existsSync(TASKS_PATH)) atomicWriteJson(TASKS_PATH, []);
 }
 
@@ -28,12 +27,37 @@ function normalizeLogs(value) {
   return Array.isArray(value) ? value.slice(0, 80).map((entry) => String(entry)) : [];
 }
 
-function taskUrl(kind, task) {
+// 生成带更新时间和可选图片索引的缓存 URL。
+function taskUrl(kind, task, index) {
   const stamp = encodeURIComponent(task.updatedAt || task.createdAt || "");
-  return `/cache/${kind}/${encodeURIComponent(task.id)}?t=${stamp}`;
+  const indexQuery = Number.isInteger(index) ? `index=${index}&` : "";
+  return `/cache/${kind}/${encodeURIComponent(task.id)}?${indexQuery}t=${stamp}`;
 }
 
+// 将新旧任务格式统一为输出文件数组。
+function outputFilesForTask(task) {
+  if (Array.isArray(task.outputFiles) && task.outputFiles.length) return task.outputFiles;
+  return task.outputFile ? [task.outputFile] : [];
+}
+
+// 将新旧任务格式统一为输出类型数组。
+function outputTypesForTask(task, count) {
+  const types = Array.isArray(task.outputTypes) ? task.outputTypes : [];
+  const normalized = [];
+  for (let index = 0; index < count; index += 1) {
+    normalized.push(types[index] || task.outputType || "image/png");
+  }
+  return normalized;
+}
+
+// 将内部任务转换为浏览器可安全消费的公开结构。
 function publicTask(task) {
+  const outputFiles = outputFilesForTask(task);
+  const outputTypes = outputTypesForTask(task, outputFiles.length);
+  const outputUrls = [];
+  for (let index = 0; index < outputFiles.length; index += 1) {
+    outputUrls.push(taskUrl("output", task, index));
+  }
   return {
     id: task.id,
     fileName: task.fileName || "image",
@@ -52,9 +76,11 @@ function publicTask(task) {
     retryCount: Number(task.retryCount || 0),
     retryAt: Number(task.retryAt || 0),
     inputUrl: task.inputFile ? taskUrl("input", task) : "",
-    outputUrl: task.outputFile ? taskUrl("output", task) : "",
+    outputUrl: outputUrls[0] || "",
+    outputUrls,
     inputType: task.inputType || "image/jpeg",
-    outputType: task.outputType || "image/png"
+    outputType: outputTypes[0] || "image/png",
+    outputTypes
   };
 }
 
@@ -159,7 +185,6 @@ module.exports = {
   CACHE_ROOT,
   INPUT_DIR,
   OUTPUT_DIR,
-  CONTACT_SHEET_DIR,
   events,
   ensureRuntime,
   safeId,
@@ -170,5 +195,7 @@ module.exports = {
   remove,
   clear,
   removeFile,
-  publicTask
+  publicTask,
+  outputFilesForTask,
+  outputTypesForTask
 };

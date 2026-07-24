@@ -2,7 +2,7 @@
 
 # POD Image Workflow
 
-**Temu 商品采集、图片缓存、BeeCode 印花提取与批量管理的一体化本地工作台**
+**Temu 商品采集、印花重绘、Moonshot 元素提取与批量管理的一体化本地工作台**
 
 [![Node.js 18+](https://img.shields.io/badge/Node.js-18%2B-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
 [![Chrome Extension](https://img.shields.io/badge/Chrome-Extension-4285F4?logo=googlechrome&logoColor=white)](#安装-chrome-扩展)
@@ -17,7 +17,7 @@
 
 ## 项目简介
 
-POD Image Workflow 把 **Temu 图片采集 Chrome 扩展** 与 **BeeCode POD 印花提取工作台** 放在同一个仓库中。扩展采集商品后，后台负责去重、缓存原图并通过 SSE 实时通知页面。
+POD Image Workflow 把 **Temu 图片采集 Chrome 扩展**、**印花重绘** 与 **元素提取** 放在同一个本地工作台中。扩展采集商品后，后台负责去重、缓存原图并通过 SSE 实时通知页面；元素提取模块可独立选择本机图片目录，通过 Moonshot 批量生成可编辑的元素清单。
 
 > 自动导入的任务只会进入 **待生成** 状态。只有手动点击“生成”或“批量生成”才会调用 BeeCode，不会因为采集或刷新页面产生费用。
 
@@ -25,10 +25,11 @@ POD Image Workflow 把 **Temu 图片采集 Chrome 扩展** 与 **BeeCode POD 印
 |---|---|
 | 商品采集 | 获取 `imageurl`、`listing` 和编号，按完整图片 URL 精确去重 |
 | 原图缓存 | JSON 导入最多 10 并发；502/503/504 或网络超时仅重试一次 |
-| 批量生图 | 默认 3 并发滑动窗口，支持停止、重发和按当前提示词重新生成 |
+| 批量生图 | 默认 3 并发、每次返回 4 张，支持停止、重发和按当前提示词重新生成 |
+| 元素提取 | 每 9 张组成 3×3 标号图，默认 3 并发调用 Moonshot，结果可编辑并导出 |
 | 状态恢复 | 输入图、生成图、提示词、日志和任务状态全部持久化 |
 | 文件下载 | 使用 `listing` 商品标题命名，只保存图片，不生成 TXT |
-| 联系表 | 当前页 50 张，10×5 排列，每格 600×600，输出 6000×3000 JPEG |
+| 联系表 | 当前页 50 张，10×5 排列，审核图由后台保存到 `runtime/test/check/` |
 
 ## 工作流程
 
@@ -96,27 +97,50 @@ runtime/config.json
 
 ```json
 {
-  "imageApi": {
-    "apiKey": "",
-    "baseUrl": "https://beecode.cc",
-    "endpoint": "/v1/images/edits",
-    "model": "gpt-image-2",
-    "size": "1024x1024",
-    "concurrency": 3
+  "shared": {
+    "moonshot": {
+      "apiKey": "",
+      "baseUrl": "https://api.moonshot.cn/v1",
+      "model": "kimi-k2.6"
+    },
+    "server": {
+      "host": "127.0.0.1",
+      "port": 8787
+    }
   },
-  "moonshot": {
-    "apiKey": "",
-    "baseUrl": "https://api.moonshot.cn/v1",
-    "model": "kimi-k2.6"
+  "patternRedraw": {
+    "imageApi": {
+      "apiKey": "",
+      "baseUrl": "https://beecode.cc",
+      "endpoint": "/v1/images/edits",
+      "model": "gpt-image-2",
+      "size": "1024x1024",
+      "concurrency": 3,
+      "n": 4,
+      "sizes": {
+        "1:1": "1024x1024",
+        "9:16": "1024x1824",
+        "4:3": "1536x1152"
+      },
+      "similarityPrompt": "重要约束：输出图与输入图的主体轮廓、构图和核心图案保持约 {similarity}% 视觉相似度，其余部分进行原创重绘。"
+    },
+    "infringement": {
+      "saveContactSheet": true,
+      "outputDir": "runtime/test/check"
+    }
   },
-  "server": {
-    "host": "127.0.0.1",
-    "port": 8787
+  "elementExtraction": {
+    "batchSize": 9,
+    "concurrency": 3,
+    "thinkingEnabled": false,
+    "prefix": "",
+    "suffix": "",
+    "prompt_prefix_model": "前后缀模式使用的固定后台提示词..."
   }
 }
 ```
 
-`imageApi` 是通用图片中转配置。切换 BeeCode、CCCode 或其他 OpenAI 兼容中转时，只需替换 `apiKey`、`baseUrl`；接口路径不同再修改 `endpoint`，无需改代码。旧版 `beecode` 字段仍可导入，服务端会自动兼容。
+`shared` 放两个模块共用的 Moonshot 与服务配置；`patternRedraw` 对应“印花重绘”；`elementExtraction` 对应“元素提取”。`prompt_prefix_model` 不显示为页面输入框，但会由前端注入当前批次货号后与图片一起发送给本地后台。`n` 控制每次返回数量（1–4），`sizes` 将页面比例直接映射到 `/v1/images/edits` 的 `size`。旧版顶层 `imageApi`、`moonshot`、`infringement`、`server` 和 `beecode` 字段仍可读取；模块 2 的旧 `prompt` 字段会在启动时替换为新的固定模板。
 
 `runtime/` 已被 Git 整目录忽略。接口和页面只返回脱敏 Key，完整 Key 不会出现在仓库或浏览器响应中。
 
@@ -152,14 +176,15 @@ runtime/config.json
 
 JSON 导入只缓存原图，不会自动进入付费生图队列。
 
-## POD 工作台
+## 模块 1：印花重绘
 
 ### 任务与生成
 
 - 每页固定 50 条，避免一次渲染大量图片导致卡顿。
 - 每个任务拥有独立提示词和运行日志。
 - 顶部提示词可覆盖全部任务，也可以逐条修改。
-- 生成请求动态读取任务当前提示词，并附加相似度与比例配置。
+- 生成请求动态读取任务当前提示词，只注入相似度强约束；比例直接映射到接口 `size`。
+- 每个任务缓存接口返回的全部图片，预览区可左右轮换。
 - 临时生成错误进入重试队列，等待 3 秒且最多重试一次。
 - 支持单张生成、批量生成、停止、重新生成、重新获取、下载和删除。
 
@@ -168,7 +193,7 @@ JSON 导入只缓存原图，不会自动进入付费生图队列。
 - 生成图使用 `listing` 商品标题命名。
 - 不添加 `-beecode` 后缀。
 - 不创建配套 TXT 文件。
-- “下载本页”只处理当前页已完成任务，并自动跳过失败项。
+- 单行“下载”只保存当前预览图；“下载本页”保存全部返回图，并添加 `-01`、`-02` 等序号。
 - 可提前选择下载文件夹，浏览器允许时直接写入该目录。
 
 ### 合并本页
@@ -179,13 +204,26 @@ JSON 导入只缓存原图，不会自动进入付费生图队列。
 50 张 / 页
 10 列 × 5 行
 600 × 600 px / 格
-6000 × 3000 px / 张
-JPEG quality: 0.94
+浏览器画布：6000 × 3000 px
+后台审核图：最长边不超过 4096 px，JPEG quality 0.86
 ```
 
 每张图片等比铺满并居中裁切；左上角使用约 52px 白色粗体编号，编号读取任务 `displayCode` 或 JSON `编号` 后缀。缺图会写入任务日志，但不会阻塞其他图片输出。
 
-合并图保存后会自动缩放至 4K 以内，发送到 Moonshot 中国区的 `kimi-k2.6` 进行侵权风险审核。审核结果以气泡卡片显示编号、风险等级和原因；没有发现风险项时也会显示明确结果。完整 API Key 仅保存在本地配置，浏览器只调用本地代理。
+浏览器不会再下载合并图。合并图缩放至 4K 以内后由后台保存到 `patternRedraw.infringement.outputDir`（默认 `runtime/test/check/`），并发送到 Moonshot 中国区的 `kimi-k2.6` 进行侵权风险审核。审核结果以气泡卡片显示编号、风险等级和原因；没有发现风险项时也会显示明确结果。
+
+## 模块 2：元素提取
+
+- 独立选择本机图片目录，不复用印花重绘任务缓存。
+- 按文件名自然排序，每 9 张生成一张 3×3 标号图，文件名去除扩展名后作为货号。
+- 批次并发可选 1–4，默认 3；单批失败会标记为可重试，不阻塞其余批次。
+- 请求由后台使用 `shared.moonshot` 配置发起，完整 API Key 不进入浏览器。
+- Moonshot 使用 SSE 逐事件读取；页面不打印逐字增量，只在完成后显示最终 JSON，同时保留 5 秒心跳、30 秒无事件告警和 180 秒请求超时。
+- “模型模式”按钮可切换“不推理·快速”和“推理·较慢”；默认读取 `elementExtraction.thinkingEnabled`，不推理模式会发送 `thinking: {"type":"disabled"}`。
+- 提示词固定读取后台 `prompt_prefix_model`；提取完成后可修改前缀、后缀并立即重新组合，不会再次请求模型。本阶段不包含 Listing 模式。
+- 结果仅保存在当前页面内存，可编辑后导出 JSON 或 Excel；SheetJS 未加载时自动降级为 CSV。
+- “导出图片文件夹”会将已完成原图按前后缀组合结果重命名并写入新目录；重名自动追加序号。
+- 失败结果支持逐行“手动重试”，也可使用侧栏按钮批量重试全部未识别项。
 
 ## 数据与安全
 
@@ -195,7 +233,7 @@ JPEG quality: 0.94
 | `runtime/tasks.json` | 任务状态、提示词、listing 和日志 | 否 |
 | `runtime/cache/input/` | 原图缓存 | 否 |
 | `runtime/cache/output/` | 已付费生成的图片 | 否 |
-| `runtime/cache/contact-sheets/` | 合并本页输出 | 否 |
+| `runtime/test/check/` | 侵权查询合并图 | 否 |
 | `runtime/logs/server.log` | 服务日志 | 否 |
 
 修改前端、刷新页面或重载扩展不会重新生成图片。不要删除 `runtime/`；需要迁移或备份时，直接复制整个目录。
@@ -215,6 +253,7 @@ JPEG quality: 0.94
 | `GET` | `/api/events` | SSE 任务事件流 |
 | `POST` | `/v1/images/edits` | BeeCode 图片编辑代理 |
 | `POST` | `/api/infringement-check` | Moonshot 合并图侵权审核代理 |
+| `POST` | `/api/element-extract` | Moonshot 3×3 元素提取代理 |
 
 SSE 事件包括：
 
@@ -222,6 +261,7 @@ SSE 事件包括：
 - `task.updated`
 - `task.deleted`
 - `tasks.cleared`
+- `element.extraction.trace`：元素提取后台节点，以及 Moonshot 每个已脱敏 `data:` 响应事件的实时转发。
 
 浏览器使用原生 `EventSource` 自动重连，页面不需要持续轮询。
 
@@ -233,7 +273,8 @@ SSE 事件包括：
 ```text
 POD-html/
 ├─ app/
-│  └─ index.html                         POD 单页前端
+│  ├─ index.html                         双模块 POD 单页前端
+│  └─ element-extraction.js              元素提取目录、批次、编辑与导出
 ├─ server/
 │  ├─ index.js                           HTTP 路由、BeeCode 代理、缓存接口
 │  ├─ config.js                          唯一配置读取与原子写入
@@ -254,7 +295,7 @@ POD-html/
 │  ├─ tasks.json                         任务状态和任务日志
 │  ├─ cache/input/                       原图
 │  ├─ cache/output/                      生成图
-│  ├─ cache/contact-sheets/              合并图目录
+│  ├─ test/check/                        侵权查询合并图
 │  └─ logs/server.log                    服务日志
 ├─ start.cmd                             Windows 一键启动
 ├─ update_plan.md                        整合设计与实施记录
