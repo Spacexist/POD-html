@@ -12,7 +12,8 @@ const {
   saveElementProductSettings,
   selectNextTransModelNode,
   selectTransModelNode,
-  publicConfig
+  publicConfig,
+  getAuthStatus
 } = require("./config");
 const store = require("./task-store");
 const { createSseHub } = require("./sse");
@@ -1196,12 +1197,20 @@ async function handleConfig(req, res) {
   }
 }
 
+// 返回登录状态：根目录是否已有可解析的 key.json。
+function handleAuthStatus(req, res) {
+  return sendJson(res, 200, getAuthStatus());
+}
+
 // 从页面载入 Moonshot 小写凭据与节点密钥映射，并刷新当前内存配置。
 async function handleKeys(req, res) {
   try {
     const config = replaceKeyConfig(await readJsonBody(req, 512 * 1024));
     appendServerLog("key.json loaded from UI");
-    return sendJson(res, 200, publicConfig(config));
+    return sendJson(res, 200, {
+      ...publicConfig(config),
+      auth: getAuthStatus()
+    });
   } catch (error) {
     return sendJson(res, 400, { error: { message: error.message, type: "key_config_error" } });
   }
@@ -1370,6 +1379,7 @@ const server = http.createServer(async (req, res) => {
   if (req.method === "GET" && url.pathname === "/app/element-extraction.js") return serveElementExtractionScript(res);
   if (req.method === "GET" && url.pathname === "/app/workflow/workflow-manager.js") return serveWorkflowManagerScript(res);
   if ((req.method === "GET" || req.method === "POST") && ["/config", "/api/config"].includes(url.pathname)) return handleConfig(req, res);
+  if (req.method === "GET" && url.pathname === "/api/auth") return handleAuthStatus(req, res);
   if (req.method === "POST" && url.pathname === "/api/keys") return handleKeys(req, res);
   if (req.method === "POST" && url.pathname === "/api/trans-model-node") return handleTransModelNode(req, res);
   if ((req.method === "GET" || req.method === "POST") && url.pathname === "/api/element-products") return handleElementProducts(req, res);

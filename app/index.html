@@ -741,7 +741,143 @@
       background: #737373;
     }
 
-    #files, #jsonFile, #keyFile { display: none; }
+    #files, #jsonFile, #keyFile, #loginKeyFile, #modifyKeyFile { display: none; }
+
+    /* 登录门禁：未识别根目录 key.json 时遮住工作台 */
+    .login-gate {
+      position: fixed;
+      inset: 0;
+      z-index: 10000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      background:
+        radial-gradient(ellipse at 30% 20%, rgba(255, 122, 61, 0.12), transparent 45%),
+        radial-gradient(ellipse at 70% 80%, rgba(0, 184, 107, 0.08), transparent 40%),
+        #0c0c0c;
+    }
+
+    .login-gate[hidden] { display: none !important; }
+
+    .login-card {
+      width: min(440px, 100%);
+      padding: 36px 32px 28px;
+      border: 1px solid #333;
+      border-radius: 14px;
+      background: linear-gradient(165deg, #1a1a1a 0%, #141414 100%);
+      box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
+      text-align: center;
+    }
+
+    .login-brand {
+      margin: 0 0 8px;
+      font-size: 26px;
+      font-weight: 800;
+      letter-spacing: 0.02em;
+      color: #fff;
+    }
+
+    .login-sub {
+      margin: 0 0 22px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    .login-status {
+      margin: 0 0 18px;
+      padding: 10px 12px;
+      border-radius: 8px;
+      border: 1px solid #333;
+      background: #121212;
+      color: #c8d0d8;
+      font-size: 13px;
+      line-height: 1.5;
+      text-align: left;
+      min-height: 42px;
+    }
+
+    .login-status.is-error {
+      border-color: rgba(255, 98, 93, 0.45);
+      color: #ffb0ad;
+      background: rgba(255, 98, 93, 0.08);
+    }
+
+    .login-status.is-ok {
+      border-color: rgba(0, 184, 107, 0.4);
+      color: #8eefc0;
+      background: rgba(0, 184, 107, 0.08);
+    }
+
+    .login-actions {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .login-actions button {
+      width: 100%;
+      height: 42px;
+      font-size: 15px;
+      font-weight: 700;
+    }
+
+    .login-hint {
+      margin: 16px 0 0;
+      color: #6f7882;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    /* 修改 key.json 弹窗 */
+    .key-dialog-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 10001;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      background: rgba(0, 0, 0, 0.72);
+    }
+
+    .key-dialog-backdrop[hidden] { display: none !important; }
+
+    .key-dialog {
+      width: min(420px, 100%);
+      padding: 28px 26px 22px;
+      border: 1px solid #3a3a3a;
+      border-radius: 12px;
+      background: #181818;
+      box-shadow: 0 18px 48px rgba(0, 0, 0, 0.5);
+    }
+
+    .key-dialog h2 {
+      margin: 0 0 8px;
+      font-size: 18px;
+      font-weight: 800;
+    }
+
+    .key-dialog p {
+      margin: 0 0 16px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    .key-dialog-actions {
+      display: flex;
+      gap: 10px;
+      justify-content: flex-end;
+    }
+
+    .key-dialog-actions button { min-width: 96px; }
+
+    body.login-locked .app {
+      visibility: hidden;
+      pointer-events: none;
+    }
 
     .element-layout {
       display: grid;
@@ -926,9 +1062,24 @@
     .element-progress-meta {
       display: flex;
       justify-content: space-between;
+      align-items: center;
+      gap: 10px;
       margin-bottom: 7px;
       color: var(--muted);
       font-size: 12px;
+    }
+
+    .element-progress-meta #elementStop {
+      flex: 0 0 auto;
+      min-width: 64px;
+      padding: 4px 10px;
+      font-size: 12px;
+    }
+
+    .element-progress-meta #elementStop:not(:disabled) {
+      border-color: #c44;
+      color: #ff8a8a;
+      background: rgba(180, 40, 40, 0.18);
     }
 
     .element-progress-track {
@@ -1098,7 +1249,33 @@
     }
   </style>
 </head>
-<body>
+<body class="login-locked">
+  <!-- 登录主页：默认读根目录 key.json，没有则导入后登录 -->
+  <div id="loginGate" class="login-gate" role="dialog" aria-modal="true" aria-labelledby="loginTitle">
+    <div class="login-card">
+      <h1 id="loginTitle" class="login-brand">POD 图像工作台</h1>
+      <p class="login-sub">请导入 <code>key.json</code> 完成登录。系统会先检查项目根目录是否已有密钥文件。</p>
+      <div id="loginStatus" class="login-status">正在检查根目录 key.json…</div>
+      <div class="login-actions">
+        <button id="loginImportKey" class="primary" type="button">导入 key.json 并登录</button>
+        <button id="loginRecheck" type="button">重新检查根目录</button>
+      </div>
+      <p class="login-hint">密钥文件需包含 Moonshot 的 apikey，以及 trans_model_pool 节点（含各节点 apikey）。导入后会写入项目根目录 key.json。</p>
+    </div>
+  </div>
+
+  <!-- 顶部「修改」：更换 key.json -->
+  <div id="keyModifyDialog" class="key-dialog-backdrop" hidden role="dialog" aria-modal="true" aria-labelledby="keyModifyTitle">
+    <div class="key-dialog">
+      <h2 id="keyModifyTitle">修改密钥</h2>
+      <p>选择本机的 <code>key.json</code> 文件导入。导入后将覆盖项目根目录现有密钥与节点配置。</p>
+      <div class="key-dialog-actions">
+        <button id="keyModifyCancel" type="button">取消</button>
+        <button id="keyModifyPick" class="primary" type="button">选择 key.json</button>
+      </div>
+    </div>
+  </div>
+
   <main class="app">
     <header class="head">
       <div class="title-zone">
@@ -1108,7 +1285,7 @@
           <button id="mockupTab" class="module-tab" type="button">套图生成</button>
         </nav>
         <div class="config-line">
-          <button id="pickConfig">载入密码</button>
+          <button id="pickConfig" type="button">修改</button>
           <div id="nodeSwitcher" class="node-switcher">
             <button id="switchNode" type="button" aria-haspopup="listbox" aria-controls="nodeMenu" aria-expanded="false">选择节点</button>
             <div id="nodeMenu" class="node-menu" role="listbox" aria-label="图片生成节点" hidden></div>
@@ -1156,6 +1333,8 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
     <input id="files" type="file" accept="image/png,image/jpeg,image/webp" multiple>
     <input id="jsonFile" type="file" accept="application/json,.json">
     <input id="keyFile" type="file" accept="application/json,.json">
+    <input id="loginKeyFile" type="file" accept="application/json,.json">
+    <input id="modifyKeyFile" type="file" accept="application/json,.json">
 
     <div class="progress-row">
       <div class="progress"><div id="bar" class="bar"></div></div>
@@ -1210,7 +1389,7 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
           <div class="element-panel-head">
             <div>
               <h2>提取设置</h2>
-              <span id="elementProviderState" class="element-subtitle">正在读取 shared.moonshot</span>
+              <span id="elementProviderState" class="element-subtitle">正在读取 Moonshot 配置</span>
             </div>
           </div>
           <div class="element-panel-body">
@@ -1264,7 +1443,10 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
             <div class="element-progress">
               <div class="element-progress-meta">
                 <span id="elementProgressText">等待开始</span>
-                <strong id="elementProgressValue">0%</strong>
+                <div style="display:flex;align-items:center;gap:10px;">
+                  <strong id="elementProgressValue">0%</strong>
+                  <button id="elementStop" type="button" disabled>停止</button>
+                </div>
               </div>
               <div class="element-progress-track"><div id="elementProgressBar" class="element-progress-bar"></div></div>
             </div>
@@ -1348,7 +1530,10 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
     const CACHE_ORIGIN = "";
     const CONFIG_ENDPOINT = "/api/config";
     const KEY_ENDPOINT = "/api/keys";
+    const AUTH_ENDPOINT = "/api/auth";
     const TRANS_MODEL_NODE_ENDPOINT = "/api/trans-model-node";
+    let appLoggedIn = false;
+    let appBootstrapped = false;
     const TRANSLATE_ENDPOINT = "/translate-listing";
     const INFRINGEMENT_CHECK_ENDPOINT = "/api/infringement-check";
     const DEFAULT_CONFIG = {
@@ -1468,8 +1653,55 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       }
     }
 
+    // 更新登录页状态文案与样式。
+    function setLoginStatus(message, kind) {
+      if (!el.loginStatus) return;
+      el.loginStatus.textContent = message;
+      el.loginStatus.classList.remove("is-error", "is-ok");
+      if (kind === "error") el.loginStatus.classList.add("is-error");
+      if (kind === "ok") el.loginStatus.classList.add("is-ok");
+    }
+
+    // 显示或隐藏登录门禁遮罩。
+    function setLoginGateVisible(visible) {
+      if (el.loginGate) el.loginGate.hidden = !visible;
+      document.body.classList.toggle("login-locked", visible);
+    }
+
+    // 显示或隐藏「修改 key.json」弹窗。
+    function setKeyModifyDialogVisible(visible) {
+      if (el.keyModifyDialog) el.keyModifyDialog.hidden = !visible;
+    }
+
+    // 查询后台：根目录是否已有可解析的 key.json。
+    async function fetchAuthStatus() {
+      const response = await fetch(AUTH_ENDPOINT, { cache: "no-store" });
+      const text = await response.text();
+      if (!response.ok) throw new Error(text.slice(0, 300));
+      return JSON.parse(text);
+    }
+
+    // 登录成功后进入工作台（只 bootstrap 一次任务恢复）。
+    async function enterWorkbench(options) {
+      const opts = options && typeof options === "object" ? options : {};
+      appLoggedIn = true;
+      setLoginGateVisible(false);
+      setKeyModifyDialogVisible(false);
+      if (!opts.skipConfig) await loadConfig();
+      if (!appBootstrapped) {
+        appBootstrapped = true;
+        loadCachedTasks()
+          .catch((error) => {
+            notice(`恢复缓存失败：${error.message}`);
+            render();
+          })
+          .finally(connectTaskEvents);
+      }
+    }
+
     // 读取 key.json：Moonshot 凭据 + 完整节点池，后台按文件内容动态重建节点列表。
-    async function importKeyFile(file) {
+    async function importKeyFile(file, options) {
+      const opts = options && typeof options === "object" ? options : {};
       const raw = await file.text();
       let parsed;
       try { parsed = JSON.parse(raw); }
@@ -1483,10 +1715,123 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       if (!response.ok) throw new Error(text.slice(0, 300));
       const summary = JSON.parse(text);
       applyConfigSummary(summary);
+      // 元素提取模块单独缓存了 hasMoonshotKey，载入 key 后必须同步刷新。
+      if (window.elementExtractionModule && typeof window.elementExtractionModule.applyMoonshotStatus === "function") {
+        window.elementExtractionModule.applyMoonshotStatus(summary);
+      }
       const nodeCount = summary.transModelPool && Array.isArray(summary.transModelPool.nodes)
         ? summary.transModelPool.nodes.length
         : 0;
-      notice(`已载入 key.json：Moonshot 凭据 + ${nodeCount} 个图片节点`);
+      const moonshotReady = summary.moonshot && summary.moonshot.hasKey;
+      const summaryText = moonshotReady
+        ? `已载入 key.json：Moonshot 已就绪 + ${nodeCount} 个图片节点`
+        : `已载入 key.json：${nodeCount} 个图片节点（Moonshot apikey 仍为空）`;
+      if (opts.fromLogin) {
+        setLoginStatus(summaryText + "，正在进入工作台…", "ok");
+        await enterWorkbench({ skipConfig: true });
+      } else {
+        notice(summaryText);
+      }
+      return summary;
+    }
+
+    // 启动时：优先用根目录 key.json 自动登录；没有则停在登录页。
+    async function bootstrapAuth() {
+      setLoginGateVisible(true);
+      setLoginStatus("正在检查根目录 key.json…", "");
+      try {
+        const auth = await fetchAuthStatus();
+        if (auth.loggedIn) {
+          const nodeText = auth.nodeCount ? `，${auth.nodeCount} 个图片节点` : "";
+          setLoginStatus(`${auth.message || "已识别根目录 key.json"}${nodeText}，正在进入…`, "ok");
+          await enterWorkbench();
+          return;
+        }
+        setLoginStatus(auth.message || "未找到根目录 key.json，请导入后登录", "error");
+      } catch (error) {
+        setLoginStatus(`无法检查登录状态：${error.message}`, "error");
+      }
+    }
+
+    // 登录页：重新检查根目录 key.json。
+    async function handleLoginRecheckClick() {
+      setLoginStatus("正在重新检查根目录 key.json…", "");
+      try {
+        const auth = await fetchAuthStatus();
+        if (auth.loggedIn) {
+          setLoginStatus(`${auth.message || "已识别根目录 key.json"}，正在进入…`, "ok");
+          await enterWorkbench();
+          return;
+        }
+        setLoginStatus(auth.message || "仍未找到可用的 key.json，请点击导入", "error");
+      } catch (error) {
+        setLoginStatus(`检查失败：${error.message}`, "error");
+      }
+    }
+
+    // 登录页：选择 key.json 文件。
+    function handleLoginImportClick() {
+      if (el.loginKeyFile) el.loginKeyFile.click();
+    }
+
+    // 登录页文件选择完成。
+    async function handleLoginKeyFileChange() {
+      const file = el.loginKeyFile && el.loginKeyFile.files[0];
+      if (!file) return;
+      setLoginStatus(`正在导入 ${file.name}…`, "");
+      try {
+        await importKeyFile(file, { fromLogin: true });
+      } catch (error) {
+        setLoginStatus(`导入失败：${error.message}`, "error");
+      } finally {
+        if (el.loginKeyFile) el.loginKeyFile.value = "";
+      }
+    }
+
+    // 顶部「修改」：弹出更换 key.json 窗口。
+    function handlePickKeyClick() {
+      setKeyModifyDialogVisible(true);
+    }
+
+    // 关闭修改密钥弹窗。
+    function handleKeyModifyCancelClick() {
+      setKeyModifyDialogVisible(false);
+    }
+
+    // 修改弹窗内选择文件。
+    function handleKeyModifyPickClick() {
+      if (el.modifyKeyFile) el.modifyKeyFile.click();
+      else if (el.keyFile) el.keyFile.click();
+    }
+
+    // 修改弹窗文件选择完成。
+    async function handleModifyKeyFileChange() {
+      const input = el.modifyKeyFile || el.keyFile;
+      const file = input && input.files[0];
+      if (!file) return;
+      try {
+        await importKeyFile(file, { fromLogin: false });
+        setKeyModifyDialogVisible(false);
+        notice(`密钥已更新：${file.name}`);
+      } catch (error) {
+        alert(`密钥导入失败：${error.message}`);
+      } finally {
+        if (input) input.value = "";
+      }
+    }
+
+    // 兼容旧 keyFile 输入（若仍被触发）。
+    async function handleKeyFileChange() {
+      const file = el.keyFile && el.keyFile.files[0];
+      if (!file) return;
+      try {
+        await importKeyFile(file, { fromLogin: !appLoggedIn });
+        setKeyModifyDialogVisible(false);
+      } catch (error) {
+        alert(`密钥导入失败：${error.message}`);
+      } finally {
+        if (el.keyFile) el.keyFile.value = "";
+      }
     }
 
     // 将图片生成节点切换为用户在气泡菜单中明确选择的节点。
@@ -1517,24 +1862,6 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       if (!el.nodeMenu || !el.switchNode) return;
       el.nodeMenu.hidden = !open;
       el.switchNode.setAttribute("aria-expanded", open ? "true" : "false");
-    }
-
-    // 打开 key.json 文件选择窗口。
-    function handlePickKeyClick() {
-      el.keyFile.click();
-    }
-
-    // 处理页面选择的 key.json 文件。
-    async function handleKeyFileChange() {
-      const file = el.keyFile.files[0];
-      if (!file) return;
-      try {
-        await importKeyFile(file);
-      } catch (error) {
-        alert(`密钥导入失败：${error.message}`);
-      } finally {
-        el.keyFile.value = "";
-      }
     }
 
     // 展开或收起手动节点选择气泡。
@@ -3249,6 +3576,17 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
     el.pickFiles.addEventListener("click", () => el.files.click());
     el.pickJson.addEventListener("click", () => el.jsonFile.click());
     el.pickConfig.addEventListener("click", handlePickKeyClick);
+    if (el.loginImportKey) el.loginImportKey.addEventListener("click", handleLoginImportClick);
+    if (el.loginRecheck) el.loginRecheck.addEventListener("click", handleLoginRecheckClick);
+    if (el.loginKeyFile) el.loginKeyFile.addEventListener("change", handleLoginKeyFileChange);
+    if (el.keyModifyCancel) el.keyModifyCancel.addEventListener("click", handleKeyModifyCancelClick);
+    if (el.keyModifyPick) el.keyModifyPick.addEventListener("click", handleKeyModifyPickClick);
+    if (el.modifyKeyFile) el.modifyKeyFile.addEventListener("change", handleModifyKeyFileChange);
+    if (el.keyModifyDialog) {
+      el.keyModifyDialog.addEventListener("click", (event) => {
+        if (event.target === el.keyModifyDialog) setKeyModifyDialogVisible(false);
+      });
+    }
     el.switchNode.addEventListener("click", handleSwitchNodeClick);
     document.addEventListener("click", handleDocumentNodeMenuClick);
     document.addEventListener("keydown", handleDocumentNodeMenuKeydown);
@@ -3373,8 +3711,10 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       schedulePromptCache(item);
     });
 
-    loadConfig();
-    loadCachedTasks().catch((error) => { notice(`恢复缓存失败：${error.message}`); render(); }).finally(connectTaskEvents);
+    // 先走登录门禁：有根目录 key.json 则自动进工作台，否则停在登录页。
+    bootstrapAuth().catch((error) => {
+      setLoginStatus(`启动失败：${error.message}`, "error");
+    });
   </script>
   <script async src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="/app/element-extraction.js"></script>

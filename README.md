@@ -30,7 +30,8 @@ POD Image Workflow 把 **Temu 图片采集 Chrome 扩展**、**印花重绘**、
 | 商品采集 | 获取 `imageurl`、`listing` 和编号，按完整图片 URL 精确去重 |
 | 原图缓存 | JSON 导入最多 10 并发；502/503/504 或网络超时仅重试一次 |
 | 批量生图 | 默认 3 并发、生成数量手输 1–4，支持取消、重发和按当前提示词重新生成 |
-| 元素提取 | 每 9 张组成 3×3 标号图，默认 3 并发调用 Moonshot，结果可编辑并导出 |
+| 元素提取 | 每 9 张组成 3×3 标号图，默认 3 并发异步调用 Moonshot；支持停止、403 自动重试，结果可编辑并导出 |
+| 登录门禁 | 打开页先认根目录 `key.json`；没有则登录页导入；顶部「修改」可覆盖换密钥 |
 | 套图生成 | 单工作区配置印花文件夹与多组底图/Mask，支持位置、缩放、旋转、混合、置换和曲线后导出 ZIP |
 | Workflow | 模块 1 生成图批量传入模块 2，模块 2 重命名后的完成图批量传入模块 3 |
 | 状态恢复 | 输入图、生成图、提示词、日志和任务状态全部持久化 |
@@ -97,6 +98,7 @@ flowchart LR
 
 1. 首次拿到项目后，双击仓库根目录的 `install-desktop.cmd`  
    → 在当前用户桌面创建快捷方式 **POD Workbench**（图标优先用本机 Chrome）  
+   → **安装完成后会自动调起 `start.cmd`**，浏览器打开登录主页  
    → 项目搬家后，再双击一次该脚本即可覆盖更新快捷方式路径。
 2. 以后只需双击桌面 **POD Workbench**（或仍双击根目录 `start.cmd`）。
 
@@ -106,6 +108,26 @@ flowchart LR
 2. 检查 `127.0.0.1:8787`；若是本项目的旧 POD 进程则结束并重启。  
 3. 后台启动 `server/index.js`，健康检查通过后打开 `http://127.0.0.1:8787/`。  
 4. 黑窗打印英文日志：成功约 2 秒后关闭；失败则 `pause` 便于查看原因。
+
+### 登录主页（key.json 门禁）
+
+浏览器打开后**不会立刻进入工作台**，先走登录门禁：
+
+```text
+打开页面
+  → GET /api/auth 检查项目根目录是否已有可解析的 key.json
+  → 有：自动登录，进入三模块工作台
+  → 无 / 损坏：停留在登录主页，点击「导入 key.json 并登录」
+```
+
+| 场景 | 行为 |
+|---|---|
+| 根目录已有合法 `key.json` | 自动登录，无需再选文件 |
+| 根目录没有 `key.json` | 登录页提示导入；导入后写入根目录并进入工作台 |
+| 已登录后要换密钥 | 顶部 **「修改」**（原「载入密码」）→ 弹窗选择新的 `key.json` 覆盖导入 |
+| 登录页点「重新检查根目录」 | 再次读磁盘上的 `key.json`（适合先手动拷文件再进页） |
+
+导入成功后，后台按文件内容**动态重建**图片节点列表；顶部「选择节点」菜单随之增减。
 
 完全离线且本机无 Node 时：把另一台机器上已下载好的整个 `tools/node/` 文件夹拷到项目里（保证存在 `tools/node/node.exe`），再启动。
 
@@ -132,8 +154,8 @@ key.json
 首次使用：
 
 1. `config.json` 只保存业务配置（模型参数、侵权提示词、Listing 产品等），**不包含**图片中转节点列表。
-2. 复制 `key.example.json` 为 `key.json`，填写 Moonshot 的 `baseurl`、`apikey`，并在 `trans_model_pool.nodes` 中按需增减节点（每个节点含 `id`、`name`、`baseurl`、`endpoint`、`model`、`price`、`apikey`）。
-3. 也可在页面点击“载入密码”导入 `key.json`：后台会按文件内容**动态重建**节点列表，前端“选择节点”菜单随之增减，不锁死在 `config.json`。
+2. 复制 `key.example.json` 为 `key.json`，填写 Moonshot 的 `baseurl`、`apikey`，并在 `trans_model_pool.nodes` 中按需增减节点（每个节点含 `id`、`name`、`baseurl`、`endpoint`、`model`、`price`、`apikey`）。也可不先拷文件，启动后在**登录主页**直接导入。
+3. 已进入工作台后，点击顶部 **「修改」** 可随时覆盖导入新的 `key.json`（弹窗选择文件）；节点列表与 Moonshot 凭据会一并刷新。
 4. 多节点时点击“选择节点”切换；当前节点 `active` 写入 `key.json`（个人偏好），不写进可分享的 `config.json`。
 
 ```json
@@ -290,9 +312,11 @@ JSON 导入只缓存原图，不会自动进入付费生图队列。
 
 - 可以独立选择本机图片目录，也可以接收模块 1 的批量传输；新批次会覆盖当前图片和提取结果。
 - 按文件名自然排序，每 9 张生成一张 3×3 标号图，文件名去除扩展名后作为货号。
-- 批次并发可选 1–4，默认 3；单批失败会标记为可重试，不阻塞其余批次。
-- 请求由后台使用 `shared.moonshot` 配置发起，完整 API Key 不进入浏览器。
-- Moonshot 使用 SSE 逐事件读取；页面不打印逐字增量，只在完成后显示最终 JSON，同时保留 5 秒心跳和 30 秒无事件告警。快速模式请求超时为 180 秒，深度推理模式为 300 秒。
+- 批次并发可选 1–4，默认 3；前端用多个异步 worker（`Promise.all`）并行领批，**单批失败不阻塞**其余批次。
+- 侧栏进度条旁提供 **「停止」**：置停止标志、中断进行中的 `fetch`（`AbortController`），不再领取新批次；被中断批次标记为「待重试」，已完成结果保留。
+- 请求链路：浏览器 `POST /api/element-extract` → 本地 Node 代理 → Moonshot `chat/completions`（SSE）。完整 API Key 只在服务端 `key.json`，不进入浏览器。
+- 上游若返回 **HTTP 403**，服务端会按 **5s → 15s → 30s** 自动重试（瞬时限流常见）；仍失败则把 `HTTP 403 [moonshot_upstream_error]` 回给前端，该批可「重试未识别」。频繁 403 时可把并发降到 1–2，并确认 Moonshot Key 额度与视觉权限。
+- Moonshot 使用 SSE 逐事件读取；页面不打印逐字增量，只在完成后显示最终 JSON，同时保留 5 秒心跳和 30 秒无事件告警。快速模式请求超时约 3 分钟，推理模式约 10 分钟。
 - “模型模式”按钮可切换“不推理·快速”和“推理·较慢”；默认读取 `elementExtraction.thinkingEnabled`，不推理模式会发送 `thinking: {"type":"disabled"}`。
 - “前后缀模式”固定读取 `prompt_prefix_model`；提取完成后可修改前缀、后缀并立即重新组合，不会再次请求模型。
 - “Listing 模式”只允许从已配置产品中选择。请求会组合该产品的业务 Prompt 与 `prompt_product_output_model` 公共 JSON 规范；普通使用界面不显示 Prompt。
@@ -357,8 +381,9 @@ Workflow 协调逻辑集中在 `app/workflow/workflow-manager.js`，模块之间
 | `GET` | `/mockup` | 独立套图生成页面 |
 | `GET` | `/app/workflow/workflow-manager.js` | 三模块会话内文件传输管理器 |
 | `GET` | `/api/health` | 健康检查和脱敏配置 |
+| `GET` | `/api/auth` | 登录状态：根目录是否已有可解析的 `key.json` |
 | `GET / POST` | `/api/config` | 读取或替换业务配置 |
-| `POST` | `/api/keys` | 载入本机 `key.json` |
+| `POST` | `/api/keys` | 导入并写入本机 `key.json`（登录 / 修改密钥） |
 | `POST` | `/api/trans-model-node` | 切换图片中转节点 |
 | `GET / POST` | `/api/element-products` | 读取或管理根目录 Listing 产品配置 |
 | `GET` | `/api/tasks` | 恢复全部任务 |
@@ -419,11 +444,11 @@ POD-html/
 ├─ docs/images/                          README 架构图与界面截图
 ├─ start.cmd                             Windows 一键启动入口
 ├─ start.ps1                             启动逻辑：Node 解析 / 便携下载 / 起服务
-├─ install-desktop.cmd                   安装桌面快捷方式 POD Workbench
+├─ install-desktop.cmd                   安装桌面快捷方式并自动启动（进登录页）
 ├─ tools/node/                           便携 Node（首次自动下载，gitignore）
 ├─ config.json                           业务配置（不含节点池，可分享）
 ├─ config.example.json                   业务配置模板
-├─ key.json                              Moonshot + 动态图片节点池（含密钥）
+├─ key.json                              Moonshot + 动态图片节点池（含密钥，登录依据）
 ├─ key.example.json                      密钥结构模板
 ├─ update_plan.md                        整合设计与实施记录
 └─ README.md
@@ -436,15 +461,18 @@ POD-html/
 | 现象 | 处理方式 |
 |---|---|
 | 页面打不开 | 运行 `start.cmd`，再访问 `http://127.0.0.1:8787/api/health` |
+| 停在登录页 | 确认根目录有合法 `key.json`，或在登录页导入；可点「重新检查根目录」；`GET /api/auth` 可看状态 |
+| 导入 key 失败 | 确认文件是合法 JSON，含顶层 `apikey` 与 `trans_model_pool.nodes`；参考 `key.example.json` |
 | 提示找不到 Node / 下载失败 | 确认能访问 npmmirror 或 nodejs.org；或从有网机器拷贝整个 `tools/node/`（需含 `node.exe`） |
 | 8787 端口被占用 | `start.cmd` 只会重启当前项目的 `server/index.js`；其他程序占用时不会被终止，请先处理端口冲突 |
 | 桌面图标失效 | 项目移动后重新双击 `install-desktop.cmd` 覆盖快捷方式 |
 | 扩展显示“待同步” | 启动本机服务，然后打开或刷新 POD 页面 |
 | JSON 原图返回 502 | 后台等待 3 秒重试一次，也可以点单行“重新获取” |
 | BeeCode 请求失败 | 查看对应任务日志，HTTP 状态和响应正文都会保留；超过 5 分钟会按超时处理 |
+| 元素提取 HTTP 403 | 多为 Moonshot 限流/权限；服务端已 5s/15s/30s 自动重试，仍失败用「重试未识别」；可降并发 |
 | 侵权审核超时/空结果 | 审核最长约 20 分钟；确认 Moonshot Key 可用，并查看 `runtime/logs/server.log` |
 | 点清空后图片仍在磁盘 | 确认已刷新到最新前端，且服务已重启；应清空整个 `runtime/cache/` |
-| 配置不生效 | 检查 `config.json` 与 `key.json` 是否为合法 JSON；密钥只在 `key.json` |
+| 配置不生效 | 检查 `config.json` 与 `key.json` 是否为合法 JSON；密钥只在 `key.json`；换密钥用顶部「修改」 |
 | 刷新后任务缺失 | 检查 `runtime/tasks.json` 和服务日志，不要重新生成 |
 | 批量传输数量为 0 | 模块 1 需至少有一个已完成且有输出的任务；模块 2 需至少有一个最终名称非空的已完成结果 |
 | 模块 3 未收到印花 | 确认使用 `http://127.0.0.1:8787/` 打开主页面，并刷新一次以加载最新 workflow 脚本 |

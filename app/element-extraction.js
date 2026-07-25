@@ -15,6 +15,8 @@ class ElementExtractionModule {
     this.productPrompts = new Map();
     this.editingProductName = "";
     this.running = false;
+    this.stopRequested = false;
+    this.activeAbortControllers = new Set();
     this.nextBatchIndex = 0;
     this.completedBatchCount = 0;
     this.totalBatchCount = 0;
@@ -40,6 +42,7 @@ class ElementExtractionModule {
     this.handleChooseFolderClick = this.handleChooseFolderClick.bind(this);
     this.handleFolderChange = this.handleFolderChange.bind(this);
     this.handleRunClick = this.handleRunClick.bind(this);
+    this.handleStopClick = this.handleStopClick.bind(this);
     this.handleRetryClick = this.handleRetryClick.bind(this);
     this.handleThinkingClick = this.handleThinkingClick.bind(this);
     this.handleAffixModeClick = this.handleAffixModeClick.bind(this);
@@ -102,6 +105,7 @@ class ElementExtractionModule {
       concurrency: document.getElementById("elementConcurrency"),
       thinkingToggle: document.getElementById("elementThinkingToggle"),
       run: document.getElementById("elementRun"),
+      stop: document.getElementById("elementStop"),
       retry: document.getElementById("elementRetry"),
       save: document.getElementById("elementSave"),
       removeSpaces: document.getElementById("elementRemoveSpaces"),
@@ -137,6 +141,7 @@ class ElementExtractionModule {
     this.elements.chooseFolder.addEventListener("click", this.handleChooseFolderClick);
     this.elements.folderInput.addEventListener("change", this.handleFolderChange);
     this.elements.run.addEventListener("click", this.handleRunClick);
+    this.elements.stop.addEventListener("click", this.handleStopClick);
     this.elements.retry.addEventListener("click", this.handleRetryClick);
     this.elements.thinkingToggle.addEventListener("click", this.handleThinkingClick);
     this.elements.affixMode.addEventListener("click", this.handleAffixModeClick);
@@ -212,6 +217,21 @@ class ElementExtractionModule {
     );
   }
 
+  /** 用公开配置里的 moonshot 字段刷新 Key 状态文案（载入 key.json 后必须调用）。 */
+  applyMoonshotStatus(payload) {
+    const moonshot = payload && payload.moonshot && typeof payload.moonshot === "object"
+      ? payload.moonshot
+      : {};
+    this.hasMoonshotKey = Boolean(moonshot.hasKey);
+    const model = moonshot.model ? String(moonshot.model) : "未配置模型";
+    if (this.elements.providerState) {
+      this.elements.providerState.textContent = this.hasMoonshotKey
+        ? `Moonshot · ${model}`
+        : "Moonshot 未配置 Key（请点「修改」导入 key.json）";
+    }
+    return model;
+  }
+
   /** 从公开配置接口读取模块 2 默认值和共享 Moonshot 状态。 */
   async loadConfig() {
     try {
@@ -231,17 +251,28 @@ class ElementExtractionModule {
       this.elements.concurrency.value = String(this.config.concurrency);
       this.renderThinkingToggle();
       await this.loadProductSettings();
-      this.hasMoonshotKey = Boolean(payload.moonshot && payload.moonshot.hasKey);
-      const model = payload.moonshot && payload.moonshot.model ? payload.moonshot.model : "未配置模型";
-      this.elements.providerState.textContent = this.hasMoonshotKey
-        ? `shared.moonshot · ${model}`
-        : "shared.moonshot 未配置 Key";
+      const model = this.applyMoonshotStatus(payload);
       this.appendLog("CONFIG", `元素提取配置已读取，模型 ${model}`);
     } catch (error) {
       this.hasMoonshotKey = false;
       this.elements.providerState.textContent = `配置读取失败：${error.message}`;
       this.appendLog("ERROR", `配置读取失败：${error.message}`);
     }
+  }
+
+  /** 运行前再向后台确认一次 Moonshot Key，避免载入 key 后仍用旧的内存标记。 */
+  async ensureMoonshotKeyReady() {
+    if (this.hasMoonshotKey) return true;
+    try {
+      const response = await fetch("/api/config", { cache: "no-store" });
+      const raw = await response.text();
+      if (!response.ok) throw new Error(raw.slice(0, 300));
+      this.applyMoonshotStatus(JSON.parse(raw));
+    } catch (error) {
+      this.hasMoonshotKey = false;
+      this.appendLog("ERROR", `Moonshot 状态刷新失败：${error.message}`);
+    }
+    return this.hasMoonshotKey;
   }
 
   /** 从根目录配置接口读取 Listing 产品、默认模式和公共输出模板。 */
@@ -696,8 +727,9 @@ class ElementExtractionModule {
       window.alert("请先选择包含商品图片的目录。");
       return;
     }
-    if (!this.hasMoonshotKey) {
-      window.alert("请先通过左上角配置文件设置 shared.moonshot.apiKey。");
+    const hasKey = await this.ensureMoonshotKeyReady();
+    if (!hasKey) {
+      window.alert("请先点击「修改」导入 key.json（需要填写顶层 apikey）。");
       return;
     }
     if (this.activeMode === "product") {
@@ -715,6 +747,26 @@ class ElementExtractionModule {
     await this.runExtraction(this.items, false);
   }
 
+  /** 用户点击停止：中断进行中的请求，并不再领取新批次。 */
+  handleStopClick() {
+    if (!this.running || this.stopRequested) return;
+    this.stopRequested = true;
+    this.appendLog("STOP", "用户请求停止，正在中断进行中的请求…");
+    this.updateProgress(
+      Number(String(this.elements.progressValue.textContent || "0").replace("%", "")) || 0,
+      "正在停止…"
+    );
+    const controllers = Array.from(this.activeAbortControllers);
+    for (let index = 0; index < controllers.length; index += 1) {
+      try {
+        controllers[index].abort();
+      } catch (error) {
+        // 忽略已结束控制器的 abort 异常
+      }
+    }
+    if (this.elements.stop) this.elements.stop.disabled = true;
+  }
+
   /** 仅重试当前未识别或请求失败的图片。 */
   async handleRetryClick() {
     if (this.running) return;
@@ -728,8 +780,9 @@ class ElementExtractionModule {
       window.alert("当前没有需要重试的图片。");
       return;
     }
-    if (!this.hasMoonshotKey) {
-      window.alert("请先配置 shared.moonshot.apiKey。");
+    const hasKey = await this.ensureMoonshotKeyReady();
+    if (!hasKey) {
+      window.alert("请先点击「修改」导入 key.json（需要填写顶层 apikey）。");
       return;
     }
     await this.runExtraction(failedItems, true);
@@ -787,6 +840,8 @@ class ElementExtractionModule {
     const extractionStartedAt = performance.now();
     const isProductMode = this.activeMode === "product";
     this.running = true;
+    this.stopRequested = false;
+    this.activeAbortControllers.clear();
     this.setBusyState(true);
     if (!isRetry) this.clearLog();
     this.appendLog(
@@ -831,13 +886,26 @@ class ElementExtractionModule {
     }
     try {
       await Promise.all(workers);
-      this.updateProgress(100, this.failedBatchCount ? "部分完成" : "处理完成");
-      this.appendLog(
-        "DONE",
-        `处理结束：${itemsToProcess.length} 张，失败批次 ${this.failedBatchCount}，总耗时 ${Math.round(performance.now() - extractionStartedAt)}ms`
-      );
+      if (this.stopRequested) {
+        this.updateProgress(
+          10 + Math.round((this.completedBatchCount / Math.max(this.totalBatchCount, 1)) * 85),
+          "已停止"
+        );
+        this.appendLog(
+          "DONE",
+          `用户停止：已完成批次 ${this.completedBatchCount}/${this.totalBatchCount}，失败批次 ${this.failedBatchCount}，总耗时 ${Math.round(performance.now() - extractionStartedAt)}ms`
+        );
+      } else {
+        this.updateProgress(100, this.failedBatchCount ? "部分完成" : "处理完成");
+        this.appendLog(
+          "DONE",
+          `处理结束：${itemsToProcess.length} 张，失败批次 ${this.failedBatchCount}，总耗时 ${Math.round(performance.now() - extractionStartedAt)}ms`
+        );
+      }
     } finally {
       this.running = false;
+      this.stopRequested = false;
+      this.activeAbortControllers.clear();
       this.setBusyState(false);
       this.renderResults();
       this.appendLog("STATE", "运行状态已释放，操作按钮已恢复");
@@ -857,6 +925,10 @@ class ElementExtractionModule {
   async runBatchWorker(batches, workerNumber) {
     this.appendLog(`W${workerNumber}`, "工作线程开始领取批次");
     while (this.nextBatchIndex < batches.length) {
+      if (this.stopRequested) {
+        this.appendLog(`W${workerNumber}`, "已收到停止指令，不再领取新批次");
+        break;
+      }
       const batchIndex = this.nextBatchIndex;
       this.nextBatchIndex += 1;
       const batch = batches[batchIndex];
@@ -868,15 +940,23 @@ class ElementExtractionModule {
       try {
         await this.processBatch(batch, batchIndex, workerNumber);
       } catch (error) {
-        this.failedBatchCount += 1;
-        this.markBatchFailed(batch, error.message);
-        this.appendLog(`W${workerNumber}`, `第 ${batchIndex + 1} 组失败：${error.message}`);
+        const stopped = this.isStopError(error) || this.stopRequested;
+        if (stopped) {
+          this.markBatchFailed(batch, "已停止，可重新提取");
+          this.appendLog(`W${workerNumber}`, `第 ${batchIndex + 1} 组已中断：用户停止`);
+        } else {
+          this.failedBatchCount += 1;
+          this.markBatchFailed(batch, error.message);
+          this.appendLog(`W${workerNumber}`, `第 ${batchIndex + 1} 组失败：${error.message}`);
+        }
       }
       this.completedBatchCount += 1;
       const progress = 10 + Math.round((this.completedBatchCount / this.totalBatchCount) * 85);
       this.updateProgress(
         progress,
-        `处理中 ${this.completedBatchCount}/${this.totalBatchCount}`
+        this.stopRequested
+          ? `正在停止 ${this.completedBatchCount}/${this.totalBatchCount}`
+          : `处理中 ${this.completedBatchCount}/${this.totalBatchCount}`
       );
       this.renderResults();
       this.appendLog(
@@ -885,11 +965,23 @@ class ElementExtractionModule {
       );
       this.workerGroupNumbers.delete(workerNumber);
     }
-    this.appendLog(`W${workerNumber}`, "没有剩余批次，工作线程结束");
+    this.appendLog(
+      `W${workerNumber}`,
+      this.stopRequested ? "工作线程因停止而结束" : "没有剩余批次，工作线程结束"
+    );
+  }
+
+  /** 判断错误是否由用户停止或 AbortController 触发。 */
+  isStopError(error) {
+    if (!error) return false;
+    if (error.name === "AbortError") return true;
+    const message = String(error.message || "");
+    return message.indexOf("已停止") >= 0 || message.indexOf("aborted") >= 0;
   }
 
   /** 生成一个 3×3 拼图并合并后台返回的结构化结果。 */
   async processBatch(batch, batchIndex, workerNumber) {
+    if (this.stopRequested) throw new Error("已停止，可重新提取");
     const batchStartedAt = performance.now();
     const batchNumber = batchIndex + 1;
     const logTag = `W${workerNumber}`;
@@ -907,6 +999,7 @@ class ElementExtractionModule {
     );
     this.appendLog(logTag, `第 ${batchNumber} 组开始生成 3×3 拼图`);
     const collage = await this.createGridCollage(batch, logTag, batchNumber);
+    if (this.stopRequested) throw new Error("已停止，可重新提取");
     this.appendLog(
       logTag,
       `第 ${batchNumber} 组拼图完成，Data URL ${collage.length} 字符，准备请求后台`
@@ -1064,6 +1157,7 @@ class ElementExtractionModule {
 
   /** 将拼图和当前提示词发送给本地元素提取代理。 */
   async callElementApi(collage, itemIds, requestId, logTag, batchNumber) {
+    if (this.stopRequested) throw new Error("已停止，可重新提取");
     const requestStartedAt = performance.now();
     const prompt = this.buildPrompt(itemIds);
     const requestHeaders = {
@@ -1085,11 +1179,25 @@ class ElementExtractionModule {
       `HTTP REQUEST\nPOST /api/element-extract\nHeaders:\n${JSON.stringify(requestHeaders, null, 2)}\nBody（图片 Base64 已折叠，实际正文 ${this.formatBytes(new Blob([requestBody]).size)}）:\n${JSON.stringify(requestLogPayload, null, 2)}`
     );
     this.appendLog(logTag, `第 ${batchNumber} 组请求 ${requestId} 已发送，等待后台与 Moonshot 响应`);
-    const response = await fetch("/api/element-extract", {
-      method: "POST",
-      headers: requestHeaders,
-      body: requestBody
-    });
+    const controller = new AbortController();
+    this.activeAbortControllers.add(controller);
+    let response;
+    try {
+      response = await fetch("/api/element-extract", {
+        method: "POST",
+        headers: requestHeaders,
+        body: requestBody,
+        signal: controller.signal
+      });
+    } catch (error) {
+      this.activeAbortControllers.delete(controller);
+      if (this.isStopError(error) || this.stopRequested) {
+        throw new Error("已停止，可重新提取");
+      }
+      throw error;
+    }
+    this.activeAbortControllers.delete(controller);
+    if (this.stopRequested) throw new Error("已停止，可重新提取");
     const responseHeaders = {};
     const headerEntries = response.headers.entries();
     let headerEntry = headerEntries.next();
@@ -1110,10 +1218,14 @@ class ElementExtractionModule {
       throw new Error(`接口返回不是 JSON：${raw.slice(0, 300)}`);
     }
     if (!response.ok) {
+      const errorType = payload.error && payload.error.type
+        ? String(payload.error.type)
+        : "";
       const message = payload.error && payload.error.message
         ? payload.error.message
         : raw.slice(0, 300);
-      throw new Error(`HTTP ${response.status}: ${message}`);
+      const typeText = errorType ? ` [${errorType}]` : "";
+      throw new Error(`HTTP ${response.status}${typeText}: ${message}`);
     }
     const rows = Array.isArray(payload.items) ? payload.items : [];
     const serverElapsed = Number(payload.elapsedMs);
@@ -1260,6 +1372,9 @@ class ElementExtractionModule {
     this.elements.workflowMockup.disabled = !hasCompleted || this.running;
     this.elements.retry.disabled = !hasPending || this.running;
     this.elements.retryAll.disabled = !hasPending || this.running;
+    if (this.elements.stop) {
+      this.elements.stop.disabled = !this.running || this.stopRequested;
+    }
     const manualRetryButtons = this.elements.resultsBody.querySelectorAll("[data-retry-item]");
     for (let index = 0; index < manualRetryButtons.length; index += 1) {
       manualRetryButtons[index].disabled = this.running;
@@ -1622,6 +1737,9 @@ class ElementExtractionModule {
     this.elements.concurrency.disabled = isBusy;
     this.elements.thinkingToggle.disabled = isBusy;
     this.elements.run.disabled = isBusy;
+    if (this.elements.stop) {
+      this.elements.stop.disabled = !isBusy || this.stopRequested;
+    }
     if (isBusy) {
       this.elements.run.textContent = this.activeMode === "product"
         ? "正在生成 Listing…"

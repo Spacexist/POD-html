@@ -818,6 +818,46 @@ function maskKey(apiKey) {
   return `${apiKey.slice(0, 3)}...${apiKey.slice(-6)}`;
 }
 
+// 判断项目根目录是否已有可解析的 key.json（登录门禁依据）。
+function keyFileExists() {
+  return fs.existsSync(KEY_PATH);
+}
+
+// 返回登录状态：优先认根目录 key.json，不暴露完整密钥。
+function getAuthStatus() {
+  const exists = keyFileExists();
+  let loggedIn = false;
+  let message = "未找到根目录 key.json，请导入后登录";
+  if (exists) {
+    try {
+      const raw = fs.readFileSync(KEY_PATH, "utf8");
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") {
+        loggedIn = true;
+        message = "已识别根目录 key.json";
+      } else {
+        message = "根目录 key.json 格式无效，请重新导入";
+      }
+    } catch (error) {
+      message = `根目录 key.json 无法解析：${error.message}`;
+    }
+  }
+  const published = publicConfig();
+  const nodeCount = published.transModelPool && Array.isArray(published.transModelPool.nodes)
+    ? published.transModelPool.nodes.length
+    : 0;
+  return {
+    ok: true,
+    loggedIn,
+    keyExists: exists,
+    keyPath: KEY_PATH,
+    message,
+    hasImageKey: Boolean(published.hasKey),
+    moonshot: published.moonshot,
+    nodeCount
+  };
+}
+
 // 返回前端可用但不暴露完整密钥的配置；节点列表来自 key.json。
 function publicConfig(config = currentConfig) {
   const imageApi = config.patternRedraw.imageApi;
@@ -902,5 +942,7 @@ module.exports = {
   selectTransModelNode,
   saveElementProductSettings,
   publicConfig,
+  getAuthStatus,
+  keyFileExists,
   atomicWriteJson
 };

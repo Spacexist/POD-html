@@ -39,6 +39,14 @@ $shortcut.Save()
 
 Write-Host "Desktop shortcut created:" -ForegroundColor Green
 Write-Host "  $LnkPath"
-Write-Host "Double-click the desktop icon next time."
+Write-Host "Starting POD after install (login page will open in browser) ..."
+$StartCmd = Join-Path $Root "start.cmd"
+if (Test-Path -LiteralPath $StartCmd) {
+  # Launch start.cmd so Node install + server + browser open after desktop shortcut is ready.
+  Start-Process -FilePath $StartCmd -WorkingDirectory $Root
+  Write-Host "Launcher started. Import key.json on the login page if needed."
+} else {
+  Write-Host "start.cmd not found next to installer; open start.cmd manually." -ForegroundColor Yellow
+}
 Write-Host "Re-run this installer after moving the project folder."
 exit 0
