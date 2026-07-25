@@ -134,39 +134,82 @@ function Resolve-NodePath {
   return $PortableNodeExe
 }
 
-function Stop-ExistingPodServer {
-  Write-Step "Checking port 8787 ..."
-  $serverPid = 0
+# Collect every PID currently LISTENING on TCP port 8787 (any local address).
+function Get-Port8787ListenerPids {
+  $pids = @{}
   $lines = netstat -ano -p tcp
   foreach ($line in $lines) {
-    if ($line -match '^\s*TCP\s+127\.0\.0\.1:8787\s+\S+\s+LISTENING\s+(\d+)\s*$') {
-      $serverPid = [int]$Matches[1]
-      break
+    # Match 127.0.0.1:8787, 0.0.0.0:8787, [::1]:8787, etc.
+    if ($line -match '^\s*TCP\s+\S*:8787\s+\S+\s+LISTENING\s+(\d+)\s*$') {
+      $pidValue = [int]$Matches[1]
+      if ($pidValue -gt 0) {
+        $pids[$pidValue] = $true
+      }
     }
   }
-  if (-not $serverPid) {
+  return @($pids.Keys)
+}
+
+# Always free port 8787 before start: kill every listener, no ownership check.
+function Stop-ExistingPodServer {
+  Write-Step "Freeing port 8787 (kill any listener, then start) ..."
+  $listenerPids = Get-Port8787ListenerPids
+  if (-not $listenerPids -or $listenerPids.Count -eq 0) {
     Write-Host "  port free"
     return
   }
 
-  $serverProcess = Get-Process -Id $serverPid -ErrorAction Stop
-  $serverDetails = Get-CimInstance Win32_Process -Filter ("ProcessId = " + $serverPid) -ErrorAction Stop
-  $commandLine = [string]$serverDetails.CommandLine
-  $isCurrentPod = $serverProcess.ProcessName -eq "node" -and
-    $commandLine.IndexOf($ServerEntry, [StringComparison]::OrdinalIgnoreCase) -ge 0
-  if (-not $isCurrentPod) {
-    Write-Fail "Port 8787 is used by another program. It was not stopped."
-    Write-Host $commandLine
+  foreach ($serverPid in $listenerPids) {
+    $procName = "?"
+    $commandLine = ""
+    try {
+      $serverProcess = Get-Process -Id $serverPid -ErrorAction SilentlyContinue
+      if ($serverProcess) { $procName = $serverProcess.ProcessName }
+      $serverDetails = Get-CimInstance Win32_Process -Filter ("ProcessId = " + $serverPid) -ErrorAction SilentlyContinue
+      if ($serverDetails) { $commandLine = [string]$serverDetails.CommandLine }
+    } catch {}
+
+    Write-Step "  killing PID $serverPid ($procName) on port 8787 ..."
+    if ($commandLine) {
+      Write-Host "    $commandLine"
+    }
+    try {
+      Stop-Process -Id $serverPid -Force -ErrorAction Stop
+    } catch {
+      # Fallback: taskkill works better for some stubborn/system-owned handles.
+      try {
+        $null = & taskkill.exe /F /PID $serverPid 2>&1
+      } catch {
+        Write-Fail "Unable to kill PID $serverPid. Run start.cmd as administrator once."
+        Write-Host $_.Exception.Message
+        exit 1
+      }
+    }
+  }
+
+  # Wait until nothing is still LISTENING on 8787.
+  $cleared = $false
+  for ($i = 0; $i -lt 20; $i++) {
+    Start-Sleep -Milliseconds 250
+    $remaining = Get-Port8787ListenerPids
+    if (-not $remaining -or $remaining.Count -eq 0) {
+      $cleared = $true
+      break
+    }
+    # Re-kill anything that reappeared or did not exit yet.
+    foreach ($serverPid in $remaining) {
+      try { Stop-Process -Id $serverPid -Force -ErrorAction SilentlyContinue } catch {}
+      try { $null = & taskkill.exe /F /PID $serverPid 2>&1 } catch {}
+    }
+  }
+
+  if (-not $cleared) {
+    $still = Get-Port8787ListenerPids
+    Write-Fail "Port 8787 is still occupied after kill: PID(s) $($still -join ', ')"
+    Write-Fail "Run start.cmd as administrator, or manually: netstat -ano | findstr :8787"
     exit 1
   }
-  try {
-    Write-Step "Stopping previous POD server (PID $serverPid) ..."
-    Stop-Process -Id $serverPid -Force -ErrorAction Stop
-    $null = $serverProcess.WaitForExit(5000)
-  } catch {
-    Write-Fail "Unable to stop the existing POD server. Run start.cmd as administrator once."
-    exit 1
-  }
+  Write-Step "Port 8787 is free." "Green"
 }
 
 function Start-PodServer([string]$NodeExe) {
