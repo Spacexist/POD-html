@@ -9,7 +9,7 @@
 [![No Dependencies](https://img.shields.io/badge/npm_dependencies-0-1f883d)](#快速开始)
 [![Local First](https://img.shields.io/badge/data-local_only-f97316)](#数据与安全)
 
-[快速开始](#快速开始) · [三模块 Workflow](#三模块-workflow) · [安装扩展](#安装-chrome-扩展) · [导入数据](#json-导入) · [接口说明](#http-与-sse) · [故障排查](#故障排查)
+[快速开始](#快速开始) · [界面预览](#界面预览) · [三模块 Workflow](#三模块-workflow) · [安装扩展](#安装-chrome-扩展) · [导入数据](#json-导入) · [接口说明](#http-与-sse) · [故障排查](#故障排查)
 
 </div>
 
@@ -20,6 +20,10 @@
 POD Image Workflow 把 **Temu 图片采集 Chrome 扩展**、**印花重绘**、**元素提取** 与 **套图生成** 放在同一个本地工作台中。扩展采集商品后，后台负责去重、缓存原图并通过 SSE 实时通知页面；元素提取模块可独立选择本机图片目录，通过 Moonshot 批量生成可编辑的元素清单；套图生成模块在独立画布中把印花批量合成到产品底图。
 
 > 自动导入的任务只会进入 **待生成** 状态。只有手动点击“生成”或“批量生成”才会调用 BeeCode，不会因为采集或刷新页面产生费用。
+
+<p align="center">
+  <img src="docs/images/00-architecture.png" alt="POD architecture: extension, local server, three modules, config vs key" width="920">
+</p>
 
 | 核心能力 | 行为 |
 |---|---|
@@ -33,6 +37,30 @@ POD Image Workflow 把 **Temu 图片采集 Chrome 扩展**、**印花重绘**、
 | 文件下载 | 使用 `listing` 商品标题命名，只保存图片，不生成 TXT |
 | 联系表 | 当前页 50 张，10×5 排列，审核图保存到 `runtime/cache/check/` |
 | 缓存清空 | 点「清空」删除任务列表，并清空整个 `runtime/cache/`（含 input / output / check） |
+
+## 界面预览
+
+真实本地界面截图（`start.cmd` 启动后打开 `http://127.0.0.1:8787/`）：
+
+<p align="center">
+  <img src="docs/images/01-pattern-redraw.png" alt="Module 1 Pattern Redraw workbench" width="920"><br>
+  <sub>模块 1 · 印花重绘：任务列表、提示词、生成控制、节点选择</sub>
+</p>
+
+<p align="center">
+  <img src="docs/images/02-element-extraction.png" alt="Module 2 Element Extraction workbench" width="920"><br>
+  <sub>模块 2 · 元素提取：目录导入、前后缀 / Listing、结果表与导出</sub>
+</p>
+
+<p align="center">
+  <img src="docs/images/03-mockup.png" alt="Module 3 Mockup canvas" width="920"><br>
+  <sub>模块 3 · 套图生成：印花组、产品底图 / Mask、画布预览与导出</sub>
+</p>
+
+<p align="center">
+  <img src="docs/images/06-modules.png" alt="Three modules overview diagram" width="920"><br>
+  <sub>三模块职责一览</sub>
+</p>
 
 ## 工作流程
 
@@ -95,6 +123,11 @@ node server/index.js
 config.json
 key.json
 ```
+
+<p align="center">
+  <img src="docs/images/05-config-split.png" alt="config.json vs key.json split" width="860"><br>
+  <sub>公司可共享 config.json；每人自备 key.json（含动态节点与密钥）</sub>
+</p>
 
 首次使用：
 
@@ -383,6 +416,7 @@ POD-html/
 │  │  ├─ output/                         生成图
 │  │  └─ check/                          侵权查询合并图（随「清空」删除）
 │  └─ logs/server.log                    服务日志
+├─ docs/images/                          README 架构图与界面截图
 ├─ start.cmd                             Windows 一键启动入口
 ├─ start.ps1                             启动逻辑：Node 解析 / 便携下载 / 起服务
 ├─ install-desktop.cmd                   安装桌面快捷方式 POD Workbench

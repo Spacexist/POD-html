@@ -1658,10 +1658,36 @@ class ElementExtractionModule {
   }
 }
 
+/** 从 URL query/hash 解析初始模块，便于 README 截图与书签深链。 */
+function readInitialModuleName() {
+  try {
+    const params = new URLSearchParams(window.location.search || "");
+    const fromQuery = String(params.get("module") || "").trim().toLowerCase();
+    const hash = String(window.location.hash || "").replace(/^#/, "").trim().toLowerCase();
+    const raw = fromQuery || hash;
+    if (raw === "element" || raw === "elementextraction" || raw === "extract") {
+      return "elementExtraction";
+    }
+    if (raw === "mockup" || raw === "套图") {
+      return "mockup";
+    }
+    if (raw === "pattern" || raw === "patternredraw" || raw === "redraw") {
+      return "patternRedraw";
+    }
+  } catch (error) {
+    // ignore bad URL and fall back to default module
+  }
+  return "patternRedraw";
+}
+
 /** 在 DOM 就绪后启动元素提取模块。 */
 function startElementExtractionModule() {
   const module = new ElementExtractionModule();
   module.init();
+  const initialModule = readInitialModuleName();
+  if (initialModule !== "patternRedraw") {
+    module.switchModule(initialModule);
+  }
   window.elementExtractionModule = module;
 }
 
