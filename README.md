@@ -60,27 +60,28 @@ flowchart LR
 ### 环境要求
 
 - Windows 10/11
-- Node.js 18 或更高版本
 - Google Chrome 或兼容 Chromium 的浏览器
+- **不必预先安装 Node**：`start.cmd` 会优先使用系统 PATH 中的 `node`；若没有，则自动下载便携 Node 20 到 `tools/node/`（优先 npmmirror，失败再走 nodejs.org）
 
 项目只使用 Node.js 内置模块，**不需要执行 `npm install`**。
 
-### 一键启动
+### 一键启动（推荐：桌面图标）
 
-双击仓库根目录的：
+1. 首次拿到项目后，双击仓库根目录的 `install-desktop.cmd`  
+   → 在当前用户桌面创建快捷方式 **POD Workbench**（图标优先用本机 Chrome）  
+   → 项目搬家后，再双击一次该脚本即可覆盖更新快捷方式路径。
+2. 以后只需双击桌面 **POD Workbench**（或仍双击根目录 `start.cmd`）。
 
-```text
-start.cmd
-```
+`start.cmd` / `start.ps1` 将自动：
 
-脚本将自动：
+1. 解析 Node：系统 `node` → 已有 `tools/node/node.exe` → 否则下载便携 Node v20.18.1。  
+2. 检查 `127.0.0.1:8787`；若是本项目的旧 POD 进程则结束并重启。  
+3. 后台启动 `server/index.js`，健康检查通过后打开 `http://127.0.0.1:8787/`。  
+4. 黑窗打印英文日志：成功约 2 秒后关闭；失败则 `pause` 便于查看原因。
 
-1. 检查 `127.0.0.1:8787` 是否已有监听进程。
-2. 如果端口由旧 POD Node 服务占用，先结束旧进程。
-3. 在后台重新启动 `node server/index.js`。
-4. 等待健康检查通过后打开 `http://127.0.0.1:8787/`。
+完全离线且本机无 Node 时：把另一台机器上已下载好的整个 `tools/node/` 文件夹拷到项目里（保证存在 `tools/node/node.exe`），再启动。
 
-也可以在项目根目录手动启动：
+也可以在项目根目录手动启动（需本机已有 Node）：
 
 ```powershell
 node server/index.js
@@ -382,7 +383,10 @@ POD-html/
 │  │  ├─ output/                         生成图
 │  │  └─ check/                          侵权查询合并图（随「清空」删除）
 │  └─ logs/server.log                    服务日志
-├─ start.cmd                             Windows 一键启动
+├─ start.cmd                             Windows 一键启动入口
+├─ start.ps1                             启动逻辑：Node 解析 / 便携下载 / 起服务
+├─ install-desktop.cmd                   安装桌面快捷方式 POD Workbench
+├─ tools/node/                           便携 Node（首次自动下载，gitignore）
 ├─ config.json                           业务配置（不含节点池，可分享）
 ├─ config.example.json                   业务配置模板
 ├─ key.json                              Moonshot + 动态图片节点池（含密钥）
@@ -398,7 +402,9 @@ POD-html/
 | 现象 | 处理方式 |
 |---|---|
 | 页面打不开 | 运行 `start.cmd`，再访问 `http://127.0.0.1:8787/api/health` |
+| 提示找不到 Node / 下载失败 | 确认能访问 npmmirror 或 nodejs.org；或从有网机器拷贝整个 `tools/node/`（需含 `node.exe`） |
 | 8787 端口被占用 | `start.cmd` 只会重启当前项目的 `server/index.js`；其他程序占用时不会被终止，请先处理端口冲突 |
+| 桌面图标失效 | 项目移动后重新双击 `install-desktop.cmd` 覆盖快捷方式 |
 | 扩展显示“待同步” | 启动本机服务，然后打开或刷新 POD 页面 |
 | JSON 原图返回 502 | 后台等待 3 秒重试一次，也可以点单行“重新获取” |
 | BeeCode 请求失败 | 查看对应任务日志，HTTP 状态和响应正文都会保留；超过 5 分钟会按超时处理 |
