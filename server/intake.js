@@ -120,10 +120,10 @@ function createIntake({ store }) {
     }
 
     const ext = extensionFromUrl(task.imageurl || task.sourceUrl, result.contentType);
+    const previousInputFile = task.inputFile;
     const inputFile = path.join(store.INPUT_DIR, `${id}${ext}`);
-    for (const oldName of fs.readdirSync(store.INPUT_DIR)) {
-      if (oldName.startsWith(`${id}.`)) store.removeFile(path.join(store.INPUT_DIR, oldName));
-    }
+    // 只清理本任务旧输入文件，避免整目录 readdir 扫描。
+    if (previousInputFile && previousInputFile !== inputFile) store.removeFile(previousInputFile);
     fs.writeFileSync(inputFile, result.buffer);
     store.upsert({
       id,
@@ -221,6 +221,17 @@ function createIntake({ store }) {
   function retry(id) {
     const task = store.findById(id);
     if (!task || !(task.imageurl || task.sourceUrl)) return false;
+    // 重新获取必须清空已有 inputFile，否则 cacheQueuedTask 会直接跳过。
+    if (task.inputFile) store.removeFile(task.inputFile);
+    store.upsert({
+      id: task.id,
+      inputFile: "",
+      inputType: "",
+      status: "queued",
+      message: "等待缓存原图",
+      errorLog: "",
+      logs: appendLog(task, "重新获取：已清空旧原图缓存，重新下载")
+    });
     enqueue(task.id);
     return true;
   }

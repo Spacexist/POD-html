@@ -57,6 +57,7 @@ class ElementExtractionModule {
     this.handleJsonClick = this.handleJsonClick.bind(this);
     this.handleExcelClick = this.handleExcelClick.bind(this);
     this.handleExportImagesClick = this.handleExportImagesClick.bind(this);
+    this.handleWorkflowMockupClick = this.handleWorkflowMockupClick.bind(this);
     this.handleResultActionClick = this.handleResultActionClick.bind(this);
     this.handleBeforeUnload = this.handleBeforeUnload.bind(this);
     this.handleTraceEvent = this.handleTraceEvent.bind(this);
@@ -107,6 +108,8 @@ class ElementExtractionModule {
       json: document.getElementById("elementJson"),
       excel: document.getElementById("elementExcel"),
       exportImages: document.getElementById("elementExportImages"),
+      workflowMockup: document.getElementById("elementWorkflowMockup"),
+      workflowStatus: document.getElementById("elementWorkflowStatus"),
       retryAll: document.getElementById("elementRetryAll"),
       progressText: document.getElementById("elementProgressText"),
       progressValue: document.getElementById("elementProgressValue"),
@@ -152,6 +155,7 @@ class ElementExtractionModule {
     this.elements.json.addEventListener("click", this.handleJsonClick);
     this.elements.excel.addEventListener("click", this.handleExcelClick);
     this.elements.exportImages.addEventListener("click", this.handleExportImagesClick);
+    this.elements.workflowMockup.addEventListener("click", this.handleWorkflowMockupClick);
     this.elements.retryAll.addEventListener("click", this.handleRetryClick);
     this.elements.resultsBody.addEventListener("click", this.handleResultActionClick);
     window.addEventListener("beforeunload", this.handleBeforeUnload);
@@ -562,11 +566,22 @@ class ElementExtractionModule {
 
   /** 接收目录文件并建立去重后的图片条目。 */
   handleFolderChange(event) {
+    const files = event.target.files;
+    const folderName = this.getFolderName(files) || "已选择图片目录";
+    this.replaceImageFiles(files, folderName);
+  }
+
+  /** 接收 workflow 文件并覆盖当前元素提取图片。 */
+  loadWorkflowFiles(files, folderName) {
+    return this.replaceImageFiles(files, folderName || "Workflow 图片");
+  }
+
+  /** 使用同一规则覆盖图片、清空旧结果并返回实际载入统计。 */
+  replaceImageFiles(files, folderName) {
     this.releaseImageUrls();
     this.items = [];
     this.clearAllResultSets();
     const seenIds = new Set();
-    const files = event.target.files;
     let duplicateCount = 0;
     for (let index = 0; index < files.length; index += 1) {
       const file = files[index];
@@ -584,14 +599,16 @@ class ElementExtractionModule {
       });
     }
     this.sortItems();
-    this.elements.folderName.textContent = this.getFolderName(files) || "已选择图片目录";
+    this.elements.folderName.textContent = folderName;
     this.elements.imageCount.textContent = `${this.items.length} 张`;
+    this.elements.workflowStatus.textContent = "";
     this.renderImageGrid();
     this.renderResults();
     this.updateProgress(0, "等待开始");
     this.clearLog();
     this.appendLog("LOAD", `已载入 ${this.items.length} 张图片`);
     if (duplicateCount) this.appendLog("WARN", `跳过 ${duplicateCount} 个重复货号`);
+    return { accepted: this.items.length, skipped: duplicateCount };
   }
 
   /** 使用稳定的自然排序整理图片货号。 */
@@ -1156,6 +1173,8 @@ class ElementExtractionModule {
 
   /** 渲染结果表，并允许编辑元素和组合结果。 */
   renderResults() {
+    // 中途重绘前同步已完成行的人工编辑；运行中不覆盖“处理中/待重试”的程序状态。
+    this.syncEdits({ onlyCompleted: this.running });
     this.elements.resultsBody.replaceChildren();
     if (!this.items.length) {
       this.renderPlaceholder("运行提取任务后，结果会显示在这里。");
@@ -1238,6 +1257,7 @@ class ElementExtractionModule {
     this.elements.json.disabled = !hasResults || this.running;
     this.elements.excel.disabled = !hasResults || this.running;
     this.elements.exportImages.disabled = !hasCompleted || this.running;
+    this.elements.workflowMockup.disabled = !hasCompleted || this.running;
     this.elements.retry.disabled = !hasPending || this.running;
     this.elements.retryAll.disabled = !hasPending || this.running;
     const manualRetryButtons = this.elements.resultsBody.querySelectorAll("[data-retry-item]");
@@ -1264,18 +1284,28 @@ class ElementExtractionModule {
   }
 
   /** 将表格中的人工修改同步回内存结果。 */
-  syncEdits() {
+  syncEdits(options = {}) {
+    const onlyCompleted = options.onlyCompleted === true;
     const rows = this.elements.resultsBody.querySelectorAll("tr[data-item-id]");
     for (let index = 0; index < rows.length; index += 1) {
       const row = rows[index];
       const result = this.results.get(row.dataset.itemId);
       if (!result) continue;
+      // 运行中的程序状态（处理中/待重试）不得被旧 DOM 回写覆盖。
+      if (onlyCompleted && result.status !== "已完成") continue;
       const elementCell = row.querySelector('[data-field="element"]');
       const fullNameCell = row.querySelector('[data-field="fullName"]');
-      if (elementCell) result.element = elementCell.textContent.trim();
-      if (fullNameCell) result.fullName = fullNameCell.textContent.trim();
+      // 只读取可编辑单元格，避免从只读占位文案回写。
+      if (elementCell && elementCell.contentEditable === "true") {
+        result.element = elementCell.textContent.trim();
+      }
+      if (fullNameCell && fullNameCell.contentEditable === "true") {
+        result.fullName = fullNameCell.textContent.trim();
+      }
       result.status = result.element && !result.element.startsWith("未识别") &&
-        result.element !== "提取失败" ? "已完成" : "待重试";
+        result.element !== "提取失败" && result.element !== "正在识别…"
+        ? "已完成"
+        : "待重试";
       this.results.set(row.dataset.itemId, result);
     }
   }
@@ -1372,14 +1402,7 @@ class ElementExtractionModule {
   async handleExportImagesClick() {
     if (this.running) return;
     this.syncEdits();
-    const completedItems = [];
-    for (let index = 0; index < this.items.length; index += 1) {
-      const item = this.items[index];
-      const result = this.results.get(item.id);
-      if (result && result.status === "已完成" && result.fullName) {
-        completedItems.push({ item, result });
-      }
-    }
+    const completedItems = this.collectCompletedItems();
     if (!completedItems.length) {
       window.alert("当前没有可导出的已完成图片。");
       return;
@@ -1420,6 +1443,66 @@ class ElementExtractionModule {
       }
       this.appendLog("ERROR", `导出图片文件夹失败：${error.message}`);
       window.alert(`导出失败：${error.message}`);
+    }
+  }
+
+  /** 返回当前结果中可导出、可传输的已完成图片条目。 */
+  collectCompletedItems() {
+    const completedItems = [];
+    for (let index = 0; index < this.items.length; index += 1) {
+      const item = this.items[index];
+      const result = this.results.get(item.id);
+      if (result && result.status === "已完成" && result.fullName) {
+        completedItems.push({ item, result });
+      }
+    }
+    return completedItems;
+  }
+
+  /** 按现有图片导出规则创建供套图模块接收的重命名 File 数组。 */
+  buildWorkflowMockupFiles(completedItems) {
+    const files = [];
+    const usedNames = new Set();
+    for (let index = 0; index < completedItems.length; index += 1) {
+      const entry = completedItems[index];
+      const fileName = this.buildExportImageFileName(
+        entry.result.fullName,
+        entry.item.file.name,
+        usedNames
+      );
+      files.push(new File([entry.item.file], fileName, {
+        type: entry.item.file.type || "image/png",
+        lastModified: Date.now()
+      }));
+    }
+    return files;
+  }
+
+  /** 将全部已完成重命名图片覆盖传入套图生成的印花组。 */
+  async handleWorkflowMockupClick() {
+    if (this.running) return;
+    this.syncEdits();
+    const completedItems = this.collectCompletedItems();
+    if (!completedItems.length) {
+      window.alert("当前没有可传输的已完成图片。");
+      return;
+    }
+    if (!window.podWorkflow) {
+      window.alert("Workflow 模块尚未加载，请刷新页面后重试。");
+      return;
+    }
+    try {
+      const files = this.buildWorkflowMockupFiles(completedItems);
+      const result = await window.podWorkflow.transferToMockup(files, this.buildExportFolderName());
+      const accepted = Number(result.accepted || 0);
+      const skipped = Number(result.skipped || 0);
+      const failed = Number(result.failed || 0);
+      this.elements.workflowStatus.textContent = `成功 ${accepted}，跳过 ${skipped}，失败 ${failed}`;
+      this.appendLog("WORKFLOW", `模块2→模块3：成功 ${accepted}，跳过 ${skipped}，失败 ${failed}`);
+    } catch (error) {
+      this.elements.workflowStatus.textContent = `成功 0，失败 ${completedItems.length}`;
+      this.appendLog("ERROR", `批量传输到套图生成失败：${error.message}`);
+      window.alert(`批量传输失败：${error.message}`);
     }
   }
 

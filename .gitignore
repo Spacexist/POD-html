@@ -4,6 +4,7 @@ opencode-beecode-image-plugin.js
 
 beecode-cache/
 runtime/
+key.json
 node_modules/
 build/
 .agents/

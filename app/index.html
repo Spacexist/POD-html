@@ -141,13 +141,86 @@
       min-width: 280px;
     }
 
+    .node-switcher {
+      position: relative;
+      flex: 0 0 auto;
+    }
+
+    .node-menu {
+      position: absolute;
+      top: calc(100% + 8px);
+      left: 0;
+      z-index: 80;
+      width: min(360px, calc(100vw - 36px));
+      padding: 6px;
+      border: 1px solid #3a3a3a;
+      border-radius: 6px;
+      background: #171717;
+      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
+    }
+
+    .node-menu[hidden] { display: none; }
+
+    .node-menu::before {
+      content: "";
+      position: absolute;
+      top: -5px;
+      left: 20px;
+      width: 8px;
+      height: 8px;
+      border-top: 1px solid #3a3a3a;
+      border-left: 1px solid #3a3a3a;
+      background: #171717;
+      transform: rotate(45deg);
+    }
+
+    .node-option {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 14px;
+      width: 100%;
+      min-height: 38px;
+      padding: 7px 10px;
+      border: 0;
+      border-radius: 4px;
+      background: transparent;
+      color: var(--text);
+      text-align: left;
+    }
+
+    .node-option:hover { background: #242424; }
+
+    .node-option.active {
+      background: #2a211d;
+      box-shadow: inset 3px 0 0 var(--accent);
+    }
+
+    .node-option-name {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .node-option-price {
+      color: var(--muted);
+      font-size: 11px;
+      white-space: nowrap;
+    }
+
     .config-status {
-      max-width: 360px;
+      display: none;
+      max-width: min(560px, 42vw);
       color: var(--muted);
       font-size: 12px;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+    }
+
+    .config-status.is-error {
+      display: inline;
+      color: var(--red);
     }
 
     .actions {
@@ -250,6 +323,13 @@
       white-space: nowrap;
     }
 
+    .node-multi-page-warning {
+      flex: 0 0 auto;
+      color: #ff9a68;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
     .risk-bubbles {
       display: flex;
       flex-wrap: wrap;
@@ -270,12 +350,13 @@
 
     .risk-card strong { color: var(--blue); margin-right: 8px; }
     .risk-card span { color: var(--muted); }
-    .risk-card p { margin: 4px 0 0; color: var(--text); }
+    .risk-card p { margin: 4px 0 0; color: var(--text); overflow-wrap: anywhere; }
     .risk-high { border-color: #cc4d43; background: rgba(204, 77, 67, 0.12); }
     .risk-medium { border-color: #bd852b; background: rgba(189, 133, 43, 0.12); }
     .risk-low { border-color: #367eb7; background: rgba(54, 126, 183, 0.12); }
     .risk-empty { color: var(--ok); }
-    .risk-error { border-color: #cc4d43; color: #ff8d84; }
+    .risk-error { max-width: min(760px, 100%); border-color: #cc4d43; color: #ff8d84; }
+    .risk-error p { white-space: pre-wrap; }
 
     textarea {
       width: 100%;
@@ -337,6 +418,8 @@
       min-height: 310px;
       background: #151515;
       border-bottom: 1px solid var(--line);
+      content-visibility: auto;
+      contain-intrinsic-size: auto 310px;
     }
 
     .task-row:last-child { border-bottom: 0; }
@@ -420,25 +503,29 @@
     .preview-box.downloadable { cursor: pointer; border: 1px solid rgba(255, 122, 61, 0.55); }
     .preview-box.downloadable:hover { border-color: var(--orange); }
 
+    .output-preview-frame {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      width: 100%;
+      min-width: 0;
+    }
+
     .output-arrow {
-      position: absolute;
-      top: 50%;
-      z-index: 2;
+      flex: 0 0 34px;
       width: 34px;
       height: 48px;
       padding: 0;
       border: 1px solid rgba(255, 255, 255, 0.24);
       border-radius: 5px;
-      background: rgba(0, 0, 0, 0.68);
+      background: var(--panel-soft);
       color: #ffffff;
       font-size: 24px;
       line-height: 1;
-      transform: translateY(-50%);
     }
 
     .output-arrow:hover { border-color: var(--orange); color: var(--orange); }
-    .output-arrow.prev { left: 8px; }
-    .output-arrow.next { right: 8px; }
 
     .output-index {
       position: absolute;
@@ -654,7 +741,7 @@
       background: #737373;
     }
 
-    #files, #jsonFile, #configFile { display: none; }
+    #files, #jsonFile, #keyFile { display: none; }
 
     .element-layout {
       display: grid;
@@ -1021,8 +1108,13 @@
           <button id="mockupTab" class="module-tab" type="button">套图生成</button>
         </nav>
         <div class="config-line">
-          <button id="pickConfig">配置文件</button>
+          <button id="pickConfig">载入密码</button>
+          <div id="nodeSwitcher" class="node-switcher">
+            <button id="switchNode" type="button" aria-haspopup="listbox" aria-controls="nodeMenu" aria-expanded="false">选择节点</button>
+            <div id="nodeMenu" class="node-menu" role="listbox" aria-label="图片生成节点" hidden></div>
+          </div>
           <span id="configStatus" class="config-status">配置读取中</span>
+          <span class="node-multi-page-warning">请勿多开：多页面会互相覆盖节点</span>
         </div>
       </div>
       <div id="patternRedrawActions" class="actions">
@@ -1036,6 +1128,8 @@
         <button id="mergePage">侵权查询</button>
         <span id="mergeStatus" class="merge-status"></span>
         <button id="start">批量生成</button>
+        <button id="workflowToElements" type="button">批量传输</button>
+        <span id="workflowTransferStatus" class="merge-status"></span>
         <button id="stop">停止</button>
         <button id="clear">清空</button>
       </div>
@@ -1046,7 +1140,7 @@
       <div class="prompt-head">
         <div class="prompt-label">提示词</div>
         <div class="prompt-tools">
-          <label class="option-group">数量 n <input id="imageCount" class="count-control" type="number" min="1" max="4" step="1" value="4" aria-label="默认生成数量"></label>
+          <label class="option-group">数量 n <input id="imageCount" class="count-control" type="text" inputmode="numeric" pattern="[1-4]" maxlength="1" value="4" autocomplete="off" aria-label="默认生成数量，手动输入 1 到 4"></label>
           <label class="option-group">相似度 <input id="similarity" class="range-control" type="range" min="5" max="100" value="50"><span id="similarityValue">50%</span></label>
           <div class="option-group">比例 <div class="ratio-buttons"><button class="ratio-button active" type="button" data-ratio="1:1">1:1</button><button class="ratio-button" type="button" data-ratio="9:16">9:16</button><button class="ratio-button" type="button" data-ratio="4:3">4:3</button></div></div>
           <button id="fillBlankPrompts">覆盖全部提示词</button>
@@ -1061,7 +1155,7 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
 
     <input id="files" type="file" accept="image/png,image/jpeg,image/webp" multiple>
     <input id="jsonFile" type="file" accept="application/json,.json">
-    <input id="configFile" type="file" accept="application/json,.json">
+    <input id="keyFile" type="file" accept="application/json,.json">
 
     <div class="progress-row">
       <div class="progress"><div id="bar" class="bar"></div></div>
@@ -1190,6 +1284,8 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
             <button id="elementExcel" type="button" disabled>导出 Excel</button>
             <button id="elementRemoveSpaces" type="button" disabled>批量去除空格</button>
             <button id="elementExportImages" type="button" disabled>导出图片文件夹</button>
+            <button id="elementWorkflowMockup" type="button" disabled>批量传输</button>
+            <span id="elementWorkflowStatus" class="element-subtitle" aria-live="polite"></span>
             <button id="elementRetryAll" type="button" disabled>批量重试</button>
           </div>
         </div>
@@ -1245,24 +1341,29 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
     </dialog>
   </main>
 
+  <script src="/app/workflow/workflow-manager.js"></script>
   <script>
     const API_ENDPOINT = "/v1/images/edits";
     const IMAGE_PROXY = "/proxy-image?url=";
     const CACHE_ORIGIN = "";
     const CONFIG_ENDPOINT = "/api/config";
+    const KEY_ENDPOINT = "/api/keys";
+    const TRANS_MODEL_NODE_ENDPOINT = "/api/trans-model-node";
     const TRANSLATE_ENDPOINT = "/translate-listing";
     const INFRINGEMENT_CHECK_ENDPOINT = "/api/infringement-check";
     const DEFAULT_CONFIG = {
-      baseUrl: "https://beecode.cc",
       endpoint: "/v1/images/edits",
       model: "gpt-image-2",
       size: "1024x1024",
       concurrency: 3,
       n: 4,
       sizes: { "1:1": "1024x1024", "9:16": "1024x1824", "4:3": "1536x1152" },
-      similarityPrompt: "重要约束：输出图与输入图的主体轮廓、构图和核心图案保持约 {similarity}% 视觉相似度，其余部分进行原创重绘。"
+      similarityPrompt: "要求： {similarity}% 原图相似度（极其重要）"
     };
     let runtimeConfig = { ...DEFAULT_CONFIG, sizes: { ...DEFAULT_CONFIG.sizes } };
+    let transModelNodes = [];
+    let activeTransModelNodeId = "";
+    let transModelNodeSwitching = false;
     const PAGE_SIZE = 50;
     const RETRY_DELAY_MS = 3000;
     const MAX_TIMEOUT_RETRIES = 1;
@@ -1273,17 +1374,64 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
     const state = { items: [], cursor: 0, running: 0, stopped: false, downloadDir: null, page: 1, pageSize: PAGE_SIZE, retryQueue: [], retryTimer: null, jsonCacheQueue: [], jsonCacheRunning: 0 };
     const logCacheTimers = new Map();
     const promptCacheTimers = new Map();
+    const activeRunControllers = new Map();
+    let taskRunSerial = 0;
+    let scheduledRenderTimer = null;
+    const pendingLogRenderIds = new Set();
+    let previewImageObserver = null;
     const el = Object.fromEntries(Array.from(document.querySelectorAll("[id]")).map((node) => [node.id, node]));
 
+    // 返回浏览器实际请求的本地图片编辑代理地址。
     function remoteEndpoint() {
-      return `${runtimeConfig.baseUrl.replace(/\/$/, "")}${runtimeConfig.endpoint}`;
+      return API_ENDPOINT;
+    }
+
+    // 将 config.json 节点价格表格式化为顶部可读文本，空值明确显示为未配置。
+    function formatTransModelNodePrice(price) {
+      const source = price && typeof price === "object" ? price : {};
+      const keys = Object.keys(source);
+      const parts = [];
+      for (let index = 0; index < keys.length; index += 1) {
+        const key = keys[index];
+        const rawValue = source[key];
+        const value = rawValue === "" || rawValue === null || rawValue === undefined
+          ? "未配置"
+          : String(rawValue);
+        parts.push(`${key}: ${value}`);
+      }
+      return parts.length ? parts.join(" / ") : "价格未配置";
+    }
+
+    // 根据 config.json 节点列表渲染手动选择气泡，并标记当前节点。
+    function renderTransModelNodeMenu() {
+      if (!el.nodeMenu) return;
+      el.nodeMenu.replaceChildren();
+      for (let index = 0; index < transModelNodes.length; index += 1) {
+        const node = transModelNodes[index];
+        const option = document.createElement("button");
+        const name = document.createElement("span");
+        const price = document.createElement("span");
+        option.type = "button";
+        option.className = node.id === activeTransModelNodeId ? "node-option active" : "node-option";
+        option.dataset.nodeId = node.id;
+        option.setAttribute("role", "option");
+        option.setAttribute("aria-selected", node.id === activeTransModelNodeId ? "true" : "false");
+        name.className = "node-option-name";
+        name.textContent = node.name;
+        price.className = "node-option-price";
+        price.textContent = formatTransModelNodePrice(node.price);
+        option.appendChild(name);
+        option.appendChild(price);
+        option.addEventListener("click", handleTransModelNodeOptionClick);
+        el.nodeMenu.appendChild(option);
+      }
     }
 
     // 应用后端公开配置，并为旧配置补齐多图和比例默认值。
     function applyConfigSummary(config) {
       const configuredSizes = config.sizes && typeof config.sizes === "object" ? config.sizes : {};
+      const transModelPool = config.transModelPool && typeof config.transModelPool === "object" ? config.transModelPool : {};
       runtimeConfig = {
-        baseUrl: (config.baseUrl || DEFAULT_CONFIG.baseUrl).replace(/\/$/, ""),
         endpoint: config.endpoint || DEFAULT_CONFIG.endpoint,
         model: config.model || DEFAULT_CONFIG.model,
         size: config.size || DEFAULT_CONFIG.size,
@@ -1296,29 +1444,37 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
         },
         similarityPrompt: String(config.similarityPrompt || DEFAULT_CONFIG.similarityPrompt)
       };
+      transModelNodes = Array.isArray(transModelPool.nodes) ? transModelPool.nodes : [];
+      activeTransModelNodeId = String(transModelPool.active || "");
       if (el.imageCount) el.imageCount.value = String(runtimeConfig.n);
-      const keyText = config.hasKey ? `key ${config.key || "已读取"}` : "未配置 key";
-      el.configStatus.textContent = `${keyText} | ${runtimeConfig.model} | ${runtimeConfig.n} 张/次 | ${runtimeConfig.concurrency} 并发`;
-      el.configStatus.title = `配置源：${config.configPath || config.keySource || "none"}`;
+      // 顶部不再展示 key、模型、张数、并发等敏感/冗余摘要。
+      el.configStatus.textContent = "";
+      el.configStatus.title = "";
+      el.configStatus.classList.remove("is-error");
+      if (el.switchNode) el.switchNode.disabled = transModelNodes.length < 2;
+      renderTransModelNodeMenu();
     }
 
+    // 从后台重新读取最新配置，禁止浏览器复用旧的节点状态。
     async function loadConfig() {
       try {
-        const response = await fetch(CONFIG_ENDPOINT);
+        const response = await fetch(CONFIG_ENDPOINT, { cache: "no-store" });
         const text = await response.text();
         if (!response.ok) throw new Error(text.slice(0, 300));
         applyConfigSummary(JSON.parse(text));
       } catch (error) {
         el.configStatus.textContent = `配置读取失败：${error.message}`;
+        el.configStatus.classList.add("is-error");
       }
     }
 
-    async function importConfigFile(file) {
+    // 读取用户选择的 Moonshot 凭据与节点密钥映射，并交由后台保存和载入。
+    async function importKeyFile(file) {
       const raw = await file.text();
       let parsed;
       try { parsed = JSON.parse(raw); }
-      catch { throw new Error("配置文件不是合法 JSON"); }
-      const response = await fetch(CONFIG_ENDPOINT, {
+      catch { throw new Error("密钥文件不是合法 JSON"); }
+      const response = await fetch(KEY_ENDPOINT, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(parsed)
@@ -1326,7 +1482,81 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       const text = await response.text();
       if (!response.ok) throw new Error(text.slice(0, 300));
       applyConfigSummary(JSON.parse(text));
-      notice("配置文件已写入 runtime/config.json");
+      notice("Moonshot 与节点密钥已载入 key.json");
+    }
+
+    // 将图片生成节点切换为用户在气泡菜单中明确选择的节点。
+    async function selectImageNode(nodeId) {
+      if (!nodeId || nodeId === activeTransModelNodeId || transModelNodeSwitching) return;
+      transModelNodeSwitching = true;
+      try {
+        const response = await fetch(TRANS_MODEL_NODE_ENDPOINT, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ nodeId })
+        });
+        const text = await response.text();
+        if (!response.ok) throw new Error(text.slice(0, 300));
+        applyConfigSummary(JSON.parse(text));
+        let activeNodeName = activeTransModelNodeId;
+        for (let index = 0; index < transModelNodes.length; index += 1) {
+          if (transModelNodes[index].id === activeTransModelNodeId) activeNodeName = transModelNodes[index].name;
+        }
+        notice(`已切换到节点：${activeNodeName}`);
+      } finally {
+        transModelNodeSwitching = false;
+      }
+    }
+
+    // 统一控制节点选择气泡的展开状态和无障碍属性。
+    function setTransModelNodeMenuOpen(open) {
+      if (!el.nodeMenu || !el.switchNode) return;
+      el.nodeMenu.hidden = !open;
+      el.switchNode.setAttribute("aria-expanded", open ? "true" : "false");
+    }
+
+    // 打开 key.json 文件选择窗口。
+    function handlePickKeyClick() {
+      el.keyFile.click();
+    }
+
+    // 处理页面选择的 key.json 文件。
+    async function handleKeyFileChange() {
+      const file = el.keyFile.files[0];
+      if (!file) return;
+      try {
+        await importKeyFile(file);
+      } catch (error) {
+        alert(`密钥导入失败：${error.message}`);
+      } finally {
+        el.keyFile.value = "";
+      }
+    }
+
+    // 展开或收起手动节点选择气泡。
+    function handleSwitchNodeClick() {
+      setTransModelNodeMenuOpen(el.nodeMenu.hidden);
+    }
+
+    // 处理气泡菜单中的节点选择操作。
+    async function handleTransModelNodeOptionClick(event) {
+      const nodeId = String(event.currentTarget.dataset.nodeId || "");
+      setTransModelNodeMenuOpen(false);
+      try {
+        await selectImageNode(nodeId);
+      } catch (error) {
+        alert(`节点切换失败：${error.message}`);
+      }
+    }
+
+    // 点击节点选择器外部时关闭气泡。
+    function handleDocumentNodeMenuClick(event) {
+      if (el.nodeSwitcher && !el.nodeSwitcher.contains(event.target)) setTransModelNodeMenuOpen(false);
+    }
+
+    // 按 Escape 键时关闭节点选择气泡。
+    function handleDocumentNodeMenuKeydown(event) {
+      if (event.key === "Escape") setTransModelNodeMenuOpen(false);
     }
 
     function cacheUrl(value) {
@@ -1452,6 +1682,7 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       item.errorLog = cached.errorLog || "";
       item.logs = Array.isArray(cached.logs) ? cached.logs : (item.logs || []);
       item.prompt = typeof cached.prompt === "string" ? cached.prompt : (typeof item.prompt === "string" ? item.prompt : "");
+      item.requestedOutputCount = Math.max(1, Math.floor(Number(cached.requestedOutputCount || item.requestedOutputCount || runtimeConfig.n)));
       item.inputType = cached.inputType || item.inputType;
       item.outputType = cached.outputType || item.outputType;
       item.inputUrl = cacheUrl(cached.inputUrl) || item.inputUrl;
@@ -1464,12 +1695,17 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       }
       if (!cachedOutputUrls.length && cached.outputUrl) cachedOutputUrls.push(cacheUrl(cached.outputUrl));
       if (cachedOutputUrls.length) {
+        // 服务端 URL 替换本地 blob 时先释放旧 blob，避免内存泄漏。
+        const previousBlobUrls = outputUrlsForItem(item).filter((url) => url && url.startsWith("blob:"));
         item.outputUrls = cachedOutputUrls;
         item.outputUrl = cachedOutputUrls[0];
         item.outputBlobs = [];
         item.outputBlob = null;
         item.outputTypes = Array.isArray(cached.outputTypes) ? cached.outputTypes.slice() : [cached.outputType || item.outputType || "image/png"];
         normalizeOutputIndex(item);
+        for (const oldUrl of previousBlobUrls) {
+          if (!cachedOutputUrls.includes(oldUrl)) revokeIfBlob(oldUrl);
+        }
       } else {
         item.outputUrls = outputUrlsForItem(item);
         item.outputBlobs = outputBlobsForItem(item);
@@ -1483,15 +1719,39 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       return item;
     }
 
+    // 生成会影响整行布局和预览的稳定签名，用于识别仅日志变化的 SSE。
+    function taskRenderSignature(item) {
+      const parts = [
+        item.status || "",
+        item.message || "",
+        item.errorLog || "",
+        item.prompt || "",
+        item.inputUrl || "",
+        item.listing || "",
+        String(item.requestedOutputCount || 0),
+        String(item.outputIndex || 0)
+      ];
+      const outputUrls = outputUrlsForItem(item);
+      for (let index = 0; index < outputUrls.length; index += 1) parts.push(outputUrls[index]);
+      return parts.join("\u0001");
+    }
+
+    // 合并服务端任务；仅日志变化时保留现有图片节点，避免中断图片解码。
     function upsertServerTask(cached, renderNow = true) {
       if (!cached || !cached.id) return null;
       let item = state.items.find((entry) => entry.id === cached.id);
+      const existed = Boolean(item);
       if (!item) {
         item = { file: null, outputBlob: null, outputBlobs: [], outputUrls: [], outputIndex: 0 };
         state.items.push(item);
       }
+      const previousSignature = taskRenderSignature(item);
       applyCachedTask(item, cached);
-      if (renderNow) render();
+      if (renderNow) {
+        const currentSignature = taskRenderSignature(item);
+        if (existed && previousSignature === currentSignature && isCurrentPageItem(item)) scheduleRender(item);
+        else render();
+      }
       return item;
     }
 
@@ -1530,16 +1790,38 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       return new Promise((resolve) => setTimeout(resolve, ms));
     }
 
-    async function fileToBase64Info(file) {
-      const dataUrl = await new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(String(reader.result || ""));
-        reader.onerror = () => reject(reader.error || new Error("读取 Base64 失败"));
-        reader.readAsDataURL(file);
-      });
-      const comma = dataUrl.indexOf(",");
-      const base64 = comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
-      return { mime: file.type || "image/png", bytes: file.size || 0, chars: base64.length };
+    // 合并短时间内连续的日志刷新，并且只更新发生变化的日志文本。
+    function scheduleRender(item) {
+      if (item && item.id) pendingLogRenderIds.add(item.id);
+      if (scheduledRenderTimer) return;
+      // 定时批量写入可见任务的日志节点，避免触碰图片元素。
+      scheduledRenderTimer = window.setTimeout(function renderScheduledTaskLogs() {
+        scheduledRenderTimer = null;
+        const ids = [];
+        for (const itemId of pendingLogRenderIds) ids.push(itemId);
+        pendingLogRenderIds.clear();
+        for (let index = 0; index < ids.length; index += 1) {
+          const itemId = ids[index];
+          const logElement = el.rows.querySelector(`[data-task-log="${itemId}"]`);
+          if (!logElement) continue;
+          let item = null;
+          for (let itemIndex = 0; itemIndex < state.items.length; itemIndex += 1) {
+            if (state.items[itemIndex].id === itemId) {
+              item = state.items[itemIndex];
+              break;
+            }
+          }
+          if (item) logElement.textContent = logText(item);
+        }
+      }, 40);
+    }
+
+    // 取消尚未执行的计划刷新，供必须立即更新的交互调用。
+    function cancelScheduledRender() {
+      if (!scheduledRenderTimer) return;
+      window.clearTimeout(scheduledRenderTimer);
+      scheduledRenderTimer = null;
+      pendingLogRenderIds.clear();
     }
 
     function taskLog(item, message, options = {}) {
@@ -1547,7 +1829,7 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       item.logs = Array.isArray(item.logs) ? item.logs : [];
       item.logs.unshift(`[${new Date().toLocaleTimeString()}] ${message}`);
       item.logs = item.logs.slice(0, 80);
-      if (options.renderNow !== false && isCurrentPageItem(item)) render();
+      if (options.renderNow !== false && isCurrentPageItem(item)) scheduleRender(item);
       if (item.cached || !item.file) scheduleLogCache(item);
     }
 
@@ -1834,6 +2116,7 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       form.set("errorLog", item.errorLog || "");
       form.set("retryCount", String(item.retryCount || 0));
       form.set("retryAt", String(item.retryAt || 0));
+      form.set("requestedOutputCount", String(item.requestedOutputCount || runtimeConfig.n));
       form.set("logs", JSON.stringify(item.logs || []));
       form.set("image", item.file, item.fileName || item.file.name);
       const response = await fetch(`${CACHE_ORIGIN}/cache/input`, { method: "POST", body: form });
@@ -1894,6 +2177,7 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       form.set("errorLog", item.errorLog || "");
       form.set("retryCount", String(item.retryCount || 0));
       form.set("retryAt", String(item.retryAt || 0));
+      form.set("requestedOutputCount", String(item.requestedOutputCount || runtimeConfig.n));
       form.set("logs", JSON.stringify(item.logs || []));
       let blobs = outputBlobs;
       if (outputBlobs instanceof Blob) blobs = [outputBlobs];
@@ -1920,6 +2204,7 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       const text = await response.text();
       if (!response.ok) throw new Error(text.slice(0, 300));
       const tasks = JSON.parse(text);
+      for (const item of state.items) revokeItemOutputs(item);
       state.items = [];
       for (const task of tasks) {
         const item = applyCachedTask({ file: null, outputBlob: null, outputBlobs: [], outputUrls: [], outputIndex: 0 }, task);
@@ -1943,12 +2228,15 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       events.addEventListener("task.deleted", (event) => {
         try {
           const payload = JSON.parse(event.data);
+          const removed = state.items.find((item) => item.id === payload.id);
+          if (removed) revokeItemOutputs(removed);
           state.items = state.items.filter((item) => item.id !== payload.id);
           clampPage();
           render();
         } catch (error) { notice(`SSE 删除解析失败：${error.message}`); }
       });
       events.addEventListener("tasks.cleared", () => {
+        for (const item of state.items) revokeItemOutputs(item);
         state.items = [];
         state.page = 1;
         render();
@@ -1957,17 +2245,52 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       return events;
     }
 
-    async function getRunFile(item) {
+    // 读取任务原图，并允许停止操作中断缓存文件下载。
+    async function getRunFile(item, signal) {
       if (item.file) return item.file;
       if (!item.inputUrl) throw new Error("缓存原图不存在");
-      const response = await fetch(item.inputUrl);
+      const response = await fetch(item.inputUrl, { signal });
       if (!response.ok) throw new Error(`读取缓存原图失败：HTTP ${response.status}`);
       const blob = await response.blob();
       const name = fileLabel(item);
       return new File([blob], name, { type: blob.type || item.inputType || "image/png" });
     }
+
+    // 将已进入预加载范围的图片地址写入 src，触发实际下载和解码。
+    function activatePreviewImage(image) {
+      if (!image || image.getAttribute("src")) return;
+      const source = image.dataset.previewSrc || "";
+      if (source) image.setAttribute("src", source);
+    }
+
+    // 创建页面唯一的预览观察器，只加载视口附近的任务图片。
+    function getPreviewImageObserver() {
+      if (previewImageObserver || !window.IntersectionObserver) return previewImageObserver;
+      // 观察回调只激活进入范围的图片，并立即解除对应观察。
+      previewImageObserver = new IntersectionObserver(function handlePreviewImageIntersections(entries) {
+        for (let index = 0; index < entries.length; index += 1) {
+          const entry = entries[index];
+          if (!entry.isIntersecting) continue;
+          activatePreviewImage(entry.target);
+          previewImageObserver.unobserve(entry.target);
+        }
+      }, { rootMargin: "700px 0px" });
+      return previewImageObserver;
+    }
+
+    // 将本次渲染产生的预览图接入按需加载；旧浏览器则直接加载。
+    function observePreviewImages() {
+      const images = el.rows.querySelectorAll("img[data-preview-src]");
+      const observer = getPreviewImageObserver();
+      for (let index = 0; index < images.length; index += 1) {
+        if (observer) observer.observe(images[index]);
+        else activatePreviewImage(images[index]);
+      }
+    }
+
     // 渲染当前页任务，并展示每个任务的多图轮播状态。
     function render() {
+      cancelScheduledRender();
       const finished = state.items.filter((item) => item.status === "done" || item.status === "error").length;
       el.bar.style.width = state.items.length ? `${Math.round((finished / state.items.length) * 100)}%` : "0%";
       el.progressText.textContent = `${finished} / ${state.items.length}`;
@@ -1978,11 +2301,13 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       el.prevPage.disabled = state.page <= 1;
       el.nextPage.disabled = state.page >= pages;
       el.lastPage.disabled = state.page >= pages;
+      if (previewImageObserver) previewImageObserver.disconnect();
       el.rows.innerHTML = "";
 
       for (const item of state.items.slice(start, end)) {
         const row = document.createElement("div");
         row.className = "task-row";
+        row.dataset.taskId = item.id;
         const statusClass = item.status === "running" ? "running" : item.status === "done" ? "done" : item.status === "error" ? "error" : item.status === "retry" ? "running" : "";
         const hasInputReady = Boolean(item.file || item.inputUrl);
         const canGenerate = item.status !== "running" && hasInputReady;
@@ -1996,21 +2321,94 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
         const outputIndex = normalizeOutputIndex(item);
         const outputUrl = currentOutputUrl(item);
         const outputName = escapeHtml(outputFileName(item, outputIndex, outputCount || 1));
-        const totalCount = item.status === "done" && outputCount ? outputCount : runtimeConfig.n;
-        const carouselControls = outputCount > 1
-          ? `<button type="button" class="output-arrow prev" data-output-prev="${item.id}" title="上一张" aria-label="上一张">‹</button><button type="button" class="output-arrow next" data-output-next="${item.id}" title="下一张" aria-label="下一张">›</button><span class="output-index">${outputIndex + 1}/${outputCount}</span>`
+        const totalCount = item.status === "done" && outputCount ? outputCount : (item.requestedOutputCount || runtimeConfig.n);
+        const previousOutputControl = outputCount > 1
+          ? `<button type="button" class="output-arrow prev" data-output-prev="${item.id}" title="上一张" aria-label="上一张">&lsaquo;</button>`
+          : "";
+        const nextOutputControl = outputCount > 1
+          ? `<button type="button" class="output-arrow next" data-output-next="${item.id}" title="下一张" aria-label="下一张">&rsaquo;</button>`
+          : "";
+        const outputIndexLabel = outputCount > 1
+          ? `<span class="output-index">${outputIndex + 1}/${outputCount}</span>`
           : "";
         row.innerHTML = `
           <div class="td"><span class="code-badge" title="${codeTitle}">${codeText || "--"}</span></div>
-          <div class="td"><div class="preview-stack"><div class="preview-box">${item.inputUrl ? `<img src="${item.inputUrl}" alt="input">` : `<span class="empty-preview">等待缓存原图</span>`}</div><div class="preview-name" title="${inputName}">${inputName}</div></div></div>
-          <div class="td"><div class="preview-stack"><div class="preview-box ${outputUrl ? "downloadable" : ""}" ${outputUrl ? `data-download="${item.id}" title="点击下载当前生成图"` : ""}>${outputUrl ? `<img src="${outputUrl}" alt="output ${outputIndex + 1}">` : `<span class="empty-preview">生成后显示</span>`}${carouselControls}</div><div class="preview-name" title="${outputName}">${outputName}</div></div></div>
+          <div class="td"><div class="preview-stack"><div class="preview-box">${item.inputUrl ? `<img data-preview-src="${item.inputUrl}" alt="input" decoding="async">` : `<span class="empty-preview">等待缓存原图</span>`}</div><div class="preview-name" title="${inputName}">${inputName}</div></div></div>
+          <div class="td"><div class="preview-stack"><div class="output-preview-frame">${previousOutputControl}<div class="preview-box ${outputUrl ? "downloadable" : ""}" ${outputUrl ? `data-download="${item.id}" title="点击下载当前生成图"` : ""}>${outputUrl ? `<img data-preview-src="${outputUrl}" alt="output ${outputIndex + 1}" decoding="async">` : `<span class="empty-preview">生成后显示</span>`}${outputIndexLabel}</div>${nextOutputControl}</div><div class="preview-name" title="${outputName}">${outputName}</div></div></div>
           <div class="td"><div class="stack"><div>总数：${totalCount}</div><div class="${item.status === "done" ? "success" : item.status === "error" ? "failed" : ""}">${item.status === "error" ? `失败：${totalCount}` : `成功：${successCount(item)}`}</div></div></div>
           <div class="td prompt-cell"><textarea class="task-prompt" data-prompt="${item.id}">${escapeHtml(itemPrompt)}</textarea></div>
-          <div class="td"><div class="stack"><div>创建时间：${escapeHtml(item.createdAt)}</div><div>状态： <span class="status-pill ${statusClass}">${statusText(item.status)}</span></div><div class="muted">${escapeHtml(item.message)}</div>${item.errorLog ? `<details class="error-detail" open><summary>失败日志</summary><pre>${escapeHtml(item.errorLog)}</pre></details>` : ""}<div class="task-log"><div class="task-log-title">任务日志</div><pre>${escapeHtml(logText(item))}</pre></div></div></div>
+          <div class="td"><div class="stack"><div>创建时间：${escapeHtml(item.createdAt)}</div><div>状态： <span class="status-pill ${statusClass}">${statusText(item.status)}</span></div><div class="muted">${escapeHtml(item.message)}</div>${item.errorLog ? `<details class="error-detail" open><summary>失败日志</summary><pre>${escapeHtml(item.errorLog)}</pre></details>` : ""}<div class="task-log"><div class="task-log-title">任务日志</div><pre data-task-log="${item.id}">${escapeHtml(logText(item))}</pre></div></div></div>
           <div class="td"><div class="ops">${item.sourceUrl ? `<button class="text-action" data-refetch="${item.id}">重新获取</button>` : ""}${canGenerate ? `<button class="text-action" data-run="${item.id}">${runText}</button>` : ""}${outputUrl ? `<button class="text-action" data-download="${item.id}">下载</button>` : ""}${item.errorLog ? `<button class="text-action" data-copy-error="${item.id}">复制日志</button>` : ""}<button class="text-action" data-delete="${item.id}">删除</button></div></div>
         `;
         el.rows.appendChild(row);
       }
+      observePreviewImages();
+    }
+
+    // 只更新单行输出预览，避免左右切换时整页重建导致闪烁。
+    function updateOutputPreview(item) {
+      if (!item || !item.id) return false;
+      const row = el.rows.querySelector(`.task-row[data-task-id="${item.id}"]`);
+      if (!row) return false;
+      const frame = row.querySelector(".output-preview-frame");
+      if (!frame) return false;
+
+      const outputUrls = outputUrlsForItem(item);
+      const outputCount = outputUrls.length;
+      const outputIndex = normalizeOutputIndex(item);
+      const outputUrl = outputUrls[outputIndex] || "";
+      const outputName = outputFileName(item, outputIndex, outputCount || 1);
+
+      const previewBox = frame.querySelector(".preview-box");
+      if (!previewBox) return false;
+
+      let image = previewBox.querySelector("img");
+      if (outputUrl) {
+        const emptyPreview = previewBox.querySelector(".empty-preview");
+        if (emptyPreview) emptyPreview.remove();
+        if (!image) {
+          image = document.createElement("img");
+          image.decoding = "async";
+          previewBox.insertBefore(image, previewBox.firstChild);
+        }
+        // 直接改 src，保留 img 节点，避免整行重建和重新懒加载。
+        if (image.getAttribute("src") !== outputUrl) image.setAttribute("src", outputUrl);
+        image.dataset.previewSrc = outputUrl;
+        image.alt = `output ${outputIndex + 1}`;
+        previewBox.classList.add("downloadable");
+        previewBox.dataset.download = item.id;
+        previewBox.title = "点击下载当前生成图";
+      } else {
+        if (image) image.remove();
+        if (!previewBox.querySelector(".empty-preview")) {
+          const empty = document.createElement("span");
+          empty.className = "empty-preview";
+          empty.textContent = "生成后显示";
+          previewBox.appendChild(empty);
+        }
+        previewBox.classList.remove("downloadable");
+        delete previewBox.dataset.download;
+        previewBox.removeAttribute("title");
+      }
+
+      let indexLabel = previewBox.querySelector(".output-index");
+      if (outputCount > 1) {
+        if (!indexLabel) {
+          indexLabel = document.createElement("span");
+          indexLabel.className = "output-index";
+          previewBox.appendChild(indexLabel);
+        }
+        indexLabel.textContent = `${outputIndex + 1}/${outputCount}`;
+      } else if (indexLabel) {
+        indexLabel.remove();
+      }
+
+      const nameNode = row.querySelector(".output-preview-frame + .preview-name");
+      if (nameNode) {
+        nameNode.textContent = outputName;
+        nameNode.title = outputName;
+      }
+      return true;
     }
 
     // 按环形方式切换任务当前预览图片。
@@ -2019,7 +2417,8 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       if (count < 2) return;
       const current = normalizeOutputIndex(item);
       item.outputIndex = (current + offset + count) % count;
-      render();
+      // 优先局部更新；找不到行节点时才回退整页渲染。
+      if (!updateOutputPreview(item)) render();
     }
 
     function nextQueuedItem() {
@@ -2093,13 +2492,28 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
 
     // 返回工具栏中的生成数量，并限制在当前接口允许的 1 到 4 张。
     function selectedImageCount() {
-      const value = Number(el.imageCount ? el.imageCount.value : runtimeConfig.n);
+      const rawValue = el.imageCount ? String(el.imageCount.value || "").trim() : "";
+      const value = Number(rawValue || runtimeConfig.n);
       if (!Number.isFinite(value)) return runtimeConfig.n;
       return Math.max(1, Math.min(4, Math.floor(value)));
     }
 
-    // 将工具栏数量同步到当前页面运行配置并刷新任务计数。
+    // 清理手动输入的生成数量，并将有效的 1 到 4 同步到运行配置。
     function handleImageCountChange() {
+      const digits = String(el.imageCount.value || "").replace(/\D/g, "");
+      if (!digits) {
+        el.imageCount.value = "";
+        return;
+      }
+      el.imageCount.value = digits;
+      const count = selectedImageCount();
+      runtimeConfig.n = count;
+      el.imageCount.value = String(count);
+      render();
+    }
+
+    // 输入框失焦时恢复最后一个有效数量，避免留下空值。
+    function handleImageCountBlur() {
       const count = selectedImageCount();
       runtimeConfig.n = count;
       el.imageCount.value = String(count);
@@ -2128,8 +2542,21 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       return runtimeConfig.sizes[ratio] || DEFAULT_CONFIG.sizes[ratio];
     }
 
+    // 创建统一的手动停止错误，避免取消操作被计入失败或自动重试。
+    function createRunCancelledError() {
+      const error = new Error("任务已停止");
+      error.name = "AbortError";
+      error.manualCancellation = true;
+      return error;
+    }
+
+    // 确认异步步骤仍属于任务当前运行，阻止旧请求覆盖新状态。
+    function assertRunActive(item, runId, controller) {
+      if (controller.signal.aborted || item.activeRunId !== runId) throw createRunCancelledError();
+    }
+
     // 将接口返回的一项图片结果转换为可缓存 Blob。
-    async function generatedResultToBlob(item, result, index) {
+    async function generatedResultToBlob(item, result, index, signal) {
       if (result && result.b64_json) {
         taskLog(item, `第 ${index + 1} 张：接收 Base64 ${result.b64_json.length} chars`);
         const blob = base64ToBlob(result.b64_json, "image/png");
@@ -2138,7 +2565,7 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       }
       if (result && result.url) {
         taskLog(item, `第 ${index + 1} 张：收到 URL，开始下载`);
-        const response = await fetch(`${IMAGE_PROXY}${encodeURIComponent(result.url)}`);
+        const response = await fetch(`${IMAGE_PROXY}${encodeURIComponent(result.url)}`, { signal });
         taskLog(item, `第 ${index + 1} 张：下载返回 HTTP ${response.status}`);
         if (!response.ok) throw new Error(`下载第 ${index + 1} 张远程图片失败：HTTP ${response.status}`);
         const blob = await response.blob();
@@ -2151,90 +2578,108 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
     // 执行单个任务的图片编辑请求并缓存全部返回图片。
     async function runItem(item) {
       if (item.status === "running") return;
+      taskRunSerial += 1;
+      const runId = taskRunSerial;
+      const controller = new AbortController();
+      item.activeRunId = runId;
+      activeRunControllers.set(item.id, { controller, runId });
+      const imageCount = selectedImageCount();
       const wasError = item.status === "error";
       const wasDone = item.status === "done";
       const wasRetry = item.status === "retry";
-      removeRetryQueue(item);
-      item.retryAt = 0;
-      item.status = "running";
-      item.message = wasDone ? "重新生成" : "准备请求";
-      item.prompt = currentPromptForItem(item);
-      if (!item.prompt) throw new Error("提示词为空：请填写该行提示词，或点击填充空白提示词。");
-      item.errorLog = "";
-      render();
-      if (wasDone) taskLog(item, "根据当前提示词重新生成");
-      if (wasRetry) taskLog(item, "超时队列重试：重新请求");
-      if (wasError) taskLog(item, "失败重发：重新请求");
-      taskLog(item, "准备：读取原图文件");
-      await cacheStatus(item).catch((error) => taskLog(item, `缓存状态失败：${error.message}`));
-
-      const runFile = await getRunFile(item);
-      taskLog(item, `读取原图：${shortName(fileLabel(item), 42)} / ${formatBytes(runFile.size || 0)}`);
-
-      item.message = "转换 Base64";
-      render();
-      taskLog(item, "转换 Base64：开始");
-      const inputBase64 = await fileToBase64Info(runFile);
-      taskLog(item, `转换 Base64：完成 ${inputBase64.mime} / ${formatBytes(inputBase64.bytes)} / ${inputBase64.chars} chars`);
-
-      const similarity = selectedSimilarity();
-      const ratio = selectedRatio();
-      const size = selectedImageSize();
-      const imageCount = selectedImageCount();
-      const prompt = buildEffectivePrompt(item.prompt, similarity);
-      taskLog(item, `提示词配置：相似度 ${similarity}%（已注入请求）`);
-      taskLog(item, `图片配置：比例 ${ratio} / size ${size} / n ${imageCount}`);
-      const form = new FormData();
-      form.set("model", runtimeConfig.model);
-      form.set("prompt", prompt);
-      form.set("size", size);
-      form.set("n", String(imageCount));
-      form.set("image", runFile, fileLabel(item));
-      taskLog(item, `组装 request：model=${runtimeConfig.model} size=${size} n=${imageCount} prompt=${prompt.length} chars image=multipart`);
-
-      item.message = "请求图片中转";
-      render();
-      taskLog(item, `request 发送：POST ${remoteEndpoint()}`);
-      taskLog(item, "等待图片中转返回...");
-      const response = await fetch(API_ENDPOINT, {
-        method: "POST",
-        body: form
-      });
-      taskLog(item, `接收返回：HTTP ${response.status}`);
-
-      const text = await response.text();
-      taskLog(item, `读取 response body：${formatBytes(text.length)}`);
-      if (!response.ok) throw new Error(`HTTP ${response.status}: ${text.slice(0, 300)}`);
-
-      let payload;
-      try { payload = JSON.parse(text); }
-      catch { throw new Error(`接口返回不是 JSON：${text.slice(0, 300)}`); }
-      taskLog(item, "解析 JSON：成功");
-
-      const results = Array.isArray(payload.data) ? payload.data : [];
-      if (!results.length) {
-        throw new Error(`接口没有返回图片：${text.slice(0, 300)}`);
-      }
-      const blobs = [];
-      const resultCount = Math.min(results.length, imageCount);
-      for (let index = 0; index < resultCount; index += 1) {
-        blobs.push(await generatedResultToBlob(item, results[index], index));
-      }
-      taskLog(item, `图片结果解析完成：${blobs.length}/${imageCount}`);
-
-      replaceItemOutputs(item, blobs);
-      item.status = "done";
-      item.message = "生成完成";
-      item.errorLog = "";
-      item.retryCount = 0;
-      item.retryAt = 0;
-      taskLog(item, "渲染预览：完成");
       try {
-        await cacheStatus(item, blobs);
+        removeRetryQueue(item);
+        item.retryAt = 0;
+        item.status = "running";
+        item.message = wasDone ? "重新生成" : "准备请求";
+        item.requestedOutputCount = imageCount;
+        item.prompt = currentPromptForItem(item);
+        if (!item.prompt) throw new Error("提示词为空：请填写该行提示词，或点击填充空白提示词。");
+        item.errorLog = "";
+        render();
+        if (wasDone) taskLog(item, "根据当前提示词重新生成");
+        if (wasRetry) taskLog(item, "超时队列重试：重新请求");
+        if (wasError) taskLog(item, "失败重发：重新请求");
+        taskLog(item, "准备：读取原图文件");
+        try {
+          await cacheStatus(item);
+        } catch (error) {
+          taskLog(item, `缓存状态失败：${error.message}`);
+        }
+        assertRunActive(item, runId, controller);
+
+        const runFile = await getRunFile(item, controller.signal);
+        assertRunActive(item, runId, controller);
+        taskLog(item, `读取原图：${shortName(fileLabel(item), 42)} / ${runFile.type || "image/png"} / ${formatBytes(runFile.size || 0)}`);
+
+        const similarity = selectedSimilarity();
+        const ratio = selectedRatio();
+        const size = selectedImageSize();
+        const prompt = buildEffectivePrompt(item.prompt, similarity);
+        taskLog(item, `提示词配置：相似度 ${similarity}%（已注入请求）`);
+        taskLog(item, `图片配置：比例 ${ratio} / size ${size} / n ${imageCount}`);
+        const form = new FormData();
+        form.set("model", runtimeConfig.model);
+        form.set("prompt", prompt);
+        form.set("size", size);
+        form.set("n", String(imageCount));
+        form.set("image", runFile, fileLabel(item));
+        taskLog(item, `组装 request：model=${runtimeConfig.model} size=${size} n=${imageCount} prompt=${prompt.length} chars image=multipart`);
+
+        item.message = "请求图片中转";
+        render();
+        taskLog(item, `request 发送：POST ${remoteEndpoint()}`);
+        taskLog(item, "等待图片中转返回...");
+        const response = await fetch(API_ENDPOINT, {
+          method: "POST",
+          body: form,
+          signal: controller.signal
+        });
+        assertRunActive(item, runId, controller);
+        taskLog(item, `接收返回：HTTP ${response.status}`);
+
+        const text = await response.text();
+        assertRunActive(item, runId, controller);
+        taskLog(item, `读取 response body：${formatBytes(text.length)}`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}: ${text.slice(0, 300)}`);
+
+        let payload;
+        try { payload = JSON.parse(text); }
+        catch { throw new Error(`接口返回不是 JSON：${text.slice(0, 300)}`); }
+        taskLog(item, "解析 JSON：成功");
+
+        const results = Array.isArray(payload.data) ? payload.data : [];
+        if (!results.length) throw new Error(`接口没有返回图片：${text.slice(0, 300)}`);
+        const blobs = [];
+        const resultCount = Math.min(results.length, imageCount);
+        for (let index = 0; index < resultCount; index += 1) {
+          blobs.push(await generatedResultToBlob(item, results[index], index, controller.signal));
+          assertRunActive(item, runId, controller);
+        }
+        taskLog(item, `图片结果解析完成：${blobs.length}/${imageCount}`);
+
+        assertRunActive(item, runId, controller);
+        replaceItemOutputs(item, blobs);
+        item.status = "done";
+        item.message = "生成完成";
+        item.errorLog = "";
+        item.retryCount = 0;
+        item.retryAt = 0;
+        taskLog(item, "渲染预览：完成");
+        try {
+          await cacheStatus(item, blobs);
+        } catch (error) {
+          taskLog(item, `缓存输出失败：${error.message}`);
+        }
+        taskLog(item, "缓存输出：完成");
       } catch (error) {
-        taskLog(item, `缓存输出失败：${error.message}`);
+        error.taskRunId = runId;
+        throw error;
+      } finally {
+        const activeRun = activeRunControllers.get(item.id);
+        if (activeRun && activeRun.runId === runId) activeRunControllers.delete(item.id);
+        if (item.activeRunId === runId) delete item.activeRunId;
       }
-      taskLog(item, "缓存输出：完成");
     }
 
     function buildErrorLog(item, error) {
@@ -2248,6 +2693,18 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
     }
 
     function failItem(item, error) {
+      if (error && error.taskRunId && item.activeRunId && item.activeRunId !== error.taskRunId) return;
+      if (error && error.name === "AbortError" && (error.manualCancellation || item.message === "已停止，可重新生成")) {
+        if (item.status === "running") item.status = "queued";
+        item.message = "已停止，可重新生成";
+        item.errorLog = "";
+        item.retryAt = 0;
+        render();
+        cacheStatus(item).catch(function handleCancelledCacheError(cacheError) {
+          notice(`缓存停止状态失败：${cacheError.message}`);
+        });
+        return;
+      }
       if (isRetryableError(error) && enqueueRetry(item, error)) {
         render();
         pump();
@@ -2427,6 +2884,65 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       notice(`下载本页完成：图片成功 ${ok}，跳过任务 ${skippedTasks}，图片失败 ${failed}`);
     }
 
+    // 将全部成功任务的第一张生成图传入元素提取模块，并显示批次统计。
+    async function handleWorkflowToElementsClick() {
+      if (!window.podWorkflow) {
+        alert("Workflow 模块尚未加载，请刷新页面后重试。");
+        return;
+      }
+      el.workflowToElements.disabled = true;
+      el.workflowTransferStatus.textContent = "正在读取生成图...";
+      const files = [];
+      let skipped = 0;
+      let failed = 0;
+      const usedNames = new Set();
+      for (let index = 0; index < state.items.length; index += 1) {
+        const item = state.items[index];
+        const outputUrls = outputUrlsForItem(item);
+        if (item.status !== "done" || !outputUrls.length) {
+          skipped += 1;
+          continue;
+        }
+        try {
+          const blob = await outputBlobForDownload(item, 0);
+          if (!blob) throw new Error("第一张生成图不存在");
+          // 用 displayCode/id 保证跨任务文件名唯一，避免模块 2 覆盖同名图。
+          let baseName = cleanFileName(
+            item.displayCode || item.sourceCode || item.id || downloadBaseName(item),
+            "image"
+          );
+          if (usedNames.has(baseName)) baseName = cleanFileName(`${baseName}-${String(item.id || index).slice(0, 8)}`, "image");
+          usedNames.add(baseName);
+          const fileName = `${baseName}.png`;
+          files.push(new File([blob], fileName, {
+            type: blob.type || "image/png",
+            lastModified: Date.now()
+          }));
+        } catch (error) {
+          failed += 1;
+          taskLog(item, `Workflow 传输失败：${error.message}`);
+        }
+      }
+      try {
+        if (!files.length) {
+          el.workflowTransferStatus.textContent = `成功 0，跳过 ${skipped}，失败 ${failed}`;
+          alert("当前没有可传输的生成图。");
+          return;
+        }
+        const result = window.podWorkflow.transferToElementExtraction(files);
+        skipped += Number(result.skipped || 0);
+        const accepted = Number(result.accepted || 0);
+        el.workflowTransferStatus.textContent = `成功 ${accepted}，跳过 ${skipped}，失败 ${failed}`;
+        notice(`Workflow 模块1→模块2：成功 ${accepted}，跳过 ${skipped}，失败 ${failed}`);
+      } catch (error) {
+        failed += files.length;
+        el.workflowTransferStatus.textContent = `成功 0，跳过 ${skipped}，失败 ${failed}`;
+        alert(`批量传输失败：${error.message}`);
+      } finally {
+        el.workflowToElements.disabled = false;
+      }
+    }
+
 
     async function blobFromUrl(url) {
       const response = await fetch(url);
@@ -2497,7 +3013,8 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
     function renderInfringementResults(items, errorMessage = "") {
       if (!el.infringementResults) return;
       el.infringementResults.textContent = "";
-      const addCard = (className, number, risk, reason) => {
+      /** 创建一张侵权结果卡片，并保留失败诊断的换行格式。 */
+      function addCard(className, number, risk, reason) {
         const card = document.createElement("article");
         card.className = `risk-card ${className}`;
         const title = document.createElement("strong");
@@ -2508,13 +3025,30 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
         detail.textContent = reason;
         card.append(title, level, detail);
         el.infringementResults.appendChild(card);
-      };
+      }
       if (errorMessage) return addCard("risk-error", "侵权审核失败", "", errorMessage);
       if (!items.length) return addCard("risk-empty", "侵权审核", "未发现风险", "当前合并图未识别到明确侵权风险项。");
       for (const item of items) {
         const className = item.risk === "高" ? "risk-high" : item.risk === "中" ? "risk-medium" : "risk-low";
         addCard(className, `编号 ${item.number}`, `${item.risk}风险`, item.reason);
       }
+    }
+
+    // 将后台返回的上游状态、响应头和正文整理为可读的失败详情。
+    function formatInfringementFailure(payload, responseStatus, raw) {
+      const lines = [];
+      const message = payload.error && payload.error.message ? payload.error.message : raw.slice(0, 300);
+      lines.push(message);
+      lines.push(`本地 HTTP：${responseStatus}`);
+      if (payload.timeoutMs) lines.push(`本地超时上限：${Math.round(Number(payload.timeoutMs) / 1000)} 秒`);
+      const upstream = payload.upstream && typeof payload.upstream === "object" ? payload.upstream : {};
+      if (upstream.status) lines.push(`上游 HTTP：${upstream.status}`);
+      if (upstream.headers && typeof upstream.headers === "object") {
+        lines.push(`Response headers：\n${JSON.stringify(upstream.headers, null, 2)}`);
+      }
+      if (upstream.body) lines.push(`Response body：\n${String(upstream.body)}`);
+      if (payload.savedContactSheet) lines.push(`拼图已后台保存至：${payload.savedContactSheet}`);
+      return lines.join("\n");
     }
 
     // 将合并拼图交给后台保存，并请求 Moonshot 侵权审核。
@@ -2532,9 +3066,7 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       try { payload = JSON.parse(raw); }
       catch { throw new Error(`侵权审核返回不是 JSON：${raw.slice(0, 300)}`); }
       if (!response.ok) {
-        const message = payload.error && payload.error.message ? payload.error.message : raw.slice(0, 300);
-        const savedText = payload.savedContactSheet ? `；拼图已后台保存至 ${payload.savedContactSheet}` : "";
-        throw new Error(`${message}${savedText}`);
+        throw new Error(formatInfringementFailure(payload, response.status, raw));
       }
       const items = Array.isArray(payload.items) ? payload.items : [];
       renderInfringementResults(items);
@@ -2659,7 +3191,10 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
 
     el.pickFiles.addEventListener("click", () => el.files.click());
     el.pickJson.addEventListener("click", () => el.jsonFile.click());
-    el.pickConfig.addEventListener("click", () => el.configFile.click());
+    el.pickConfig.addEventListener("click", handlePickKeyClick);
+    el.switchNode.addEventListener("click", handleSwitchNodeClick);
+    document.addEventListener("click", handleDocumentNodeMenuClick);
+    document.addEventListener("keydown", handleDocumentNodeMenuKeydown);
     el.chooseFolder.addEventListener("click", () => chooseDownloadFolder().catch((error) => notice(`选择下载文件夹失败：${error.message}`)));
     el.downloadPage.addEventListener("click", () => downloadCurrentPage().catch((error) => notice(`下载本页失败：${error.message}`)));
     if (el.translateEnglish) el.translateEnglish.addEventListener("click", () => translateAllListings().catch((error) => { setTranslateStatus(`失败：${error.message}`); notice(`翻译英文失败：${error.message}`); }).finally(() => { el.translateEnglish.disabled = false; }));
@@ -2667,7 +3202,10 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
     el.similarity.addEventListener("input", () => {
       el.similarityValue.textContent = `${selectedSimilarity()}%`;
     });
-    if (el.imageCount) el.imageCount.addEventListener("input", handleImageCountChange);
+    if (el.imageCount) {
+      el.imageCount.addEventListener("input", handleImageCountChange);
+      el.imageCount.addEventListener("blur", handleImageCountBlur);
+    }
     document.querySelectorAll("[data-ratio]").forEach((button) => {
       button.addEventListener("click", () => {
         document.querySelectorAll("[data-ratio]").forEach((entry) => entry.classList.toggle("active", entry === button));
@@ -2689,23 +3227,38 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
     });
     el.files.addEventListener("change", () => addFiles(el.files.files));
     el.jsonFile.addEventListener("change", () => { if (el.jsonFile.files[0]) addJsonFile(el.jsonFile.files[0]); });
-    el.configFile.addEventListener("change", () => {
-      const file = el.configFile.files[0];
-      if (!file) return;
-      importConfigFile(file).catch((error) => alert(`配置导入失败：${error.message}`)).finally(() => { el.configFile.value = ""; });
-    });
+    el.keyFile.addEventListener("change", handleKeyFileChange);
     el.firstPage.addEventListener("click", () => { state.page = 1; render(); });
     el.prevPage.addEventListener("click", () => { state.page -= 1; render(); });
     el.nextPage.addEventListener("click", () => { state.page += 1; render(); });
     el.lastPage.addEventListener("click", () => { state.page = totalPages(); render(); });
     el.start.addEventListener("click", startQueue);
-    el.stop.addEventListener("click", () => {
+    el.workflowToElements.addEventListener("click", handleWorkflowToElementsClick);
+    // 停止继续派发并取消所有在途生成请求，任务恢复为可再次生成状态。
+    function stopRunningTasks() {
       state.stopped = true;
       clearRetryTimer();
-      for (const item of state.items.filter((entry) => entry.status === "queued" || entry.status === "running" || entry.status === "retry")) taskLog(item, "已停止继续派发新任务", { renderNow: false });
+      for (const activeRun of activeRunControllers.values()) {
+        activeRun.controller.abort(createRunCancelledError());
+      }
+      for (let index = 0; index < state.items.length; index += 1) {
+        const item = state.items[index];
+        if (item.status !== "queued" && item.status !== "running" && item.status !== "retry") continue;
+        item.activeRunId = 0;
+        item.status = "queued";
+        item.message = "已停止，可重新生成";
+        item.errorLog = "";
+        item.retryAt = 0;
+        taskLog(item, "已停止并取消当前请求", { renderNow: false });
+      }
       render();
-    });
-    el.clear.addEventListener("click", () => {
+    }
+
+    el.stop.addEventListener("click", stopRunningTasks);
+    el.clear.addEventListener("click", async () => {
+      if (!window.confirm("确定清空全部任务，并删除本地缓存图片与侵权拼图？此操作不可撤销。")) return;
+      // 先停掉进行中的生成，避免清空后后台仍写缓存。
+      stopRunningTasks();
       for (const item of state.items) {
         revokeIfBlob(item.inputUrl);
         revokeItemOutputs(item);
@@ -2715,8 +3268,20 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       state.page = 1;
       state.retryQueue = [];
       clearRetryTimer();
-      fetch(`${CACHE_ORIGIN}/cache/tasks`, { method: "DELETE" }).catch((error) => notice(`清空缓存失败：${error.message}`));
       render();
+      try {
+        const response = await fetch(`${CACHE_ORIGIN}/cache/tasks`, { method: "DELETE" });
+        const text = await response.text();
+        if (!response.ok) throw new Error(text.slice(0, 300));
+        let payload = {};
+        try { payload = JSON.parse(text); } catch { payload = {}; }
+        const tasksCleared = Number(payload.tasksCleared || 0);
+        const cacheFiles = Number(payload.cacheFilesRemoved || 0);
+        const sheets = Number(payload.contactSheetsRemoved || 0);
+        notice(`已清空：任务 ${tasksCleared}，缓存文件 ${cacheFiles}，侵权拼图 ${sheets}`);
+      } catch (error) {
+        notice(`清空缓存失败：${error.message}`);
+      }
     });
 
     el.rows.addEventListener("click", (event) => {

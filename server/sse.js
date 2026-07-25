@@ -18,11 +18,23 @@ function createSseHub() {
 
   function publish(eventName, payload) {
     const frame = `event: ${eventName}\ndata: ${JSON.stringify(payload)}\n\n`;
-    for (const client of clients) client.write(frame);
+    for (const client of [...clients]) {
+      try {
+        client.write(frame);
+      } catch {
+        clients.delete(client);
+      }
+    }
   }
 
   const heartbeat = setInterval(() => {
-    for (const client of clients) client.write(`: heartbeat ${Date.now()}\n\n`);
+    for (const client of [...clients]) {
+      try {
+        client.write(`: heartbeat ${Date.now()}\n\n`);
+      } catch {
+        clients.delete(client);
+      }
+    }
   }, 25000);
   heartbeat.unref();
 

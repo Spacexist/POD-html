@@ -219,6 +219,9 @@ function injectDownloadButton(card) {
   btn.addEventListener('click', async (e) => {
     e.stopPropagation();
     e.preventDefault();
+    // 连点保护：同一按钮处理中直接忽略，避免重复写入扩展缓存。
+    if (btn.dataset.busy === '1') return;
+    btn.dataset.busy = '1';
 
     Logger.log('info', '点击下载按钮，开始分析商品卡片...');
     const title = getTitle(card);
@@ -230,6 +233,7 @@ function injectDownloadButton(card) {
     if (!imageUrl) {
       Logger.log('error', '获取商品图片 URL 失败！请联系开发者更新。');
       setButtonState(btn, 'error', '无法获取图片');
+      btn.dataset.busy = '0';
       return;
     }
 
@@ -258,6 +262,7 @@ function injectDownloadButton(card) {
             listing: title
           },
           (response) => {
+            btn.dataset.busy = '0';
             if (chrome.runtime.lastError) {
               const errMsg = chrome.runtime.lastError.message;
               Logger.log('error', `后台通讯失败: ${errMsg}`);
@@ -290,11 +295,13 @@ function injectDownloadButton(card) {
         Logger.log('success', `大图地址: ${imageUrl}`);
         window.open(imageUrl, '_blank');
         setButtonState(btn, 'success');
+        btn.dataset.busy = '0';
       }
     } catch (err) {
       Logger.log('error', `任务触发异常: ${err.message}`);
       console.error('[Temu DL]', err);
       setButtonState(btn, 'error', '下载失败');
+      btn.dataset.busy = '0';
     }
   });
 

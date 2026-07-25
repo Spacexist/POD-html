@@ -7,8 +7,11 @@ const {
   RUNTIME_ROOT,
   getConfig,
   getElementProductSettings,
+  replaceKeyConfig,
   replaceConfig,
   saveElementProductSettings,
+  selectNextTransModelNode,
+  selectTransModelNode,
   publicConfig
 } = require("./config");
 const store = require("./task-store");
@@ -17,8 +20,12 @@ const { createIntake } = require("./intake");
 
 const APP_PATH = path.join(ROOT, "app", "index.html");
 const LOG_PATH = path.join(RUNTIME_ROOT, "logs", "server.log");
+const IMAGE_EDIT_TIMEOUT_MS = 5 * 60 * 1000;
+const INFRINGEMENT_TIMEOUT_MS = 20 * 60 * 1000;
 const MOONSHOT_THINKING_TIMEOUT_MS = 10 * 60 * 1000;
 const MOONSHOT_FAST_TIMEOUT_MS = 3 * 60 * 1000;
+// 浏览器 -> 8787 的整请求超时必须覆盖最长上游任务（侵权审核 20 分钟），并留一点收尾余量。
+const SERVER_REQUEST_TIMEOUT_MS = INFRINGEMENT_TIMEOUT_MS + 60 * 1000;
 const MOONSHOT_403_RETRY_DELAYS_MS = [5000, 15000, 30000];
 const sse = createSseHub();
 const intake = createIntake({ store });
@@ -405,43 +412,51 @@ async function cacheInput(req, res) {
     if (!id || !file) return sendJson(res, 400, { error: { message: "缺少 id 或 image" } });
     const fileName = cleanFileName(file.filename || parsed.fields.fileName || "image");
     const ext = extFromNameOrType(fileName, file.contentType);
-    const inputFile = path.join(store.INPUT_DIR, `${id}${ext}`);
-    for (const oldName of fs.readdirSync(store.INPUT_DIR)) {
-      if (oldName.startsWith(`${id}.`)) store.removeFile(path.join(store.INPUT_DIR, oldName));
+    const previousTask = store.findById(id);
+    const previousInputFile = previousTask && previousTask.inputFile;
+    const version = `${Date.now().toString(36)}-${process.hrtime.bigint().toString(36)}`;
+    const inputFile = path.join(store.INPUT_DIR, `${id}-${version}${ext}`);
+    try {
+      fs.writeFileSync(inputFile, file.data);
+    } catch (error) {
+      store.removeFile(inputFile);
+      throw error;
     }
-    fs.writeFileSync(inputFile, file.data);
-    const task = store.upsert({
-      id,
-      fileName,
-      createdAt: parsed.fields.createdAt || new Date().toLocaleString("zh-CN", { hour12: false }),
-      status: parsed.fields.status || "queued",
-      message: parsed.fields.message || "等待生成",
-      prompt: parsePrompt(parsed.fields.prompt),
-      sourceCode: parsed.fields.sourceCode || "",
-      displayCode: parsed.fields.displayCode || "",
-      listing: String(parsed.fields.listing || ""),
-      imageurl: parsed.fields.imageurl || parsed.fields.sourceUrl || "",
-      sourceUrl: parsed.fields.sourceUrl || parsed.fields.imageurl || "",
-      errorLog: parsed.fields.errorLog || "",
-      retryCount: Number(parsed.fields.retryCount || 0),
-      retryAt: Number(parsed.fields.retryAt || 0),
-      logs: parseLogs(parsed.fields.logs),
-      inputFile,
-      inputType: file.contentType || "image/jpeg"
-    }, store.findById(id) ? "task.updated" : "task.created");
+    let task;
+    try {
+      task = store.upsert({
+        id,
+        fileName,
+        createdAt: parsed.fields.createdAt || new Date().toLocaleString("zh-CN", { hour12: false }),
+        status: parsed.fields.status || "queued",
+        message: parsed.fields.message || "等待生成",
+        prompt: parsePrompt(parsed.fields.prompt),
+        sourceCode: parsed.fields.sourceCode || "",
+        displayCode: parsed.fields.displayCode || "",
+        listing: String(parsed.fields.listing || ""),
+        imageurl: parsed.fields.imageurl || parsed.fields.sourceUrl || "",
+        sourceUrl: parsed.fields.sourceUrl || parsed.fields.imageurl || "",
+        errorLog: parsed.fields.errorLog || "",
+        retryCount: Number(parsed.fields.retryCount || 0),
+        retryAt: Number(parsed.fields.retryAt || 0),
+        requestedOutputCount: Math.max(1, Math.floor(Number(parsed.fields.requestedOutputCount || 1))),
+        logs: parseLogs(parsed.fields.logs),
+        inputFile,
+        inputType: file.contentType || "image/jpeg"
+      }, previousTask ? "task.updated" : "task.created");
+    } catch (error) {
+      store.removeFile(inputFile);
+      throw error;
+    }
+    if (previousInputFile && previousInputFile !== inputFile) {
+      try { store.removeFile(previousInputFile); }
+      catch (error) { appendServerLog(`old input cleanup failed: ${error.message}`); }
+    }
     return sendJson(res, 200, store.publicTask(task));
   } catch (error) {
     appendServerLog(`cache input failed: ${error.message}`);
     return sendJson(res, 500, { error: { message: error.message } });
   }
-}
-
-// 判断缓存目录中的文件是否属于指定任务的某一张输出图。
-function isTaskOutputFile(fileName, id) {
-  if (fileName.startsWith(`${id}.`)) return true;
-  if (!fileName.startsWith(`${id}-`)) return false;
-  const remainder = fileName.slice(id.length + 1);
-  return /^\d+\.[^.]+$/.test(remainder);
 }
 
 // 按字段名顺序收集 output0、output1 等多图文件，并兼容旧字段 output。
@@ -487,23 +502,31 @@ async function cacheOutput(req, res) {
       errorLog: parsed.fields.errorLog || "",
       retryCount: Number(parsed.fields.retryCount || 0),
       retryAt: Number(parsed.fields.retryAt || 0),
+      requestedOutputCount: Math.max(1, Math.floor(Number(parsed.fields.requestedOutputCount || 1))),
       logs: parseLogs(parsed.fields.logs)
     };
     const files = collectOutputFiles(parsed.files);
+    const previousTask = store.findById(id);
+    const previousOutputFiles = previousTask ? store.outputFilesForTask(previousTask).slice() : [];
+    const writtenOutputFiles = [];
     if (files.length) {
-      for (const oldName of fs.readdirSync(store.OUTPUT_DIR)) {
-        if (isTaskOutputFile(oldName, id)) store.removeFile(path.join(store.OUTPUT_DIR, oldName));
-      }
       const outputFiles = [];
       const outputTypes = [];
-      for (let index = 0; index < files.length; index += 1) {
-        const file = files[index].file;
-        if (!file || !file.data.length) continue;
-        const ext = extFromNameOrType(file.filename || `output-${index + 1}.png`, file.contentType || "image/png");
-        const outputFile = path.join(store.OUTPUT_DIR, `${id}-${index + 1}${ext}`);
-        fs.writeFileSync(outputFile, file.data);
-        outputFiles.push(outputFile);
-        outputTypes.push(file.contentType || "image/png");
+      const version = `${Date.now().toString(36)}-${process.hrtime.bigint().toString(36)}`;
+      try {
+        for (let index = 0; index < files.length; index += 1) {
+          const file = files[index].file;
+          if (!file || !file.data.length) continue;
+          const ext = extFromNameOrType(file.filename || `output-${index + 1}.png`, file.contentType || "image/png");
+          const outputFile = path.join(store.OUTPUT_DIR, `${id}-${version}-${index + 1}${ext}`);
+          writtenOutputFiles.push(outputFile);
+          fs.writeFileSync(outputFile, file.data);
+          outputFiles.push(outputFile);
+          outputTypes.push(file.contentType || "image/png");
+        }
+      } catch (error) {
+        for (const writtenFile of writtenOutputFiles) store.removeFile(writtenFile);
+        throw error;
       }
       if (outputFiles.length) {
         update.outputFiles = outputFiles;
@@ -512,7 +535,21 @@ async function cacheOutput(req, res) {
         update.outputType = outputTypes[0];
       }
     }
-    return sendJson(res, 200, store.publicTask(store.upsert(update)));
+    let savedTask;
+    try {
+      savedTask = store.upsert(update);
+    } catch (error) {
+      for (const writtenFile of writtenOutputFiles) store.removeFile(writtenFile);
+      throw error;
+    }
+    if (writtenOutputFiles.length) {
+      for (const previousOutputFile of previousOutputFiles) {
+        if (writtenOutputFiles.includes(previousOutputFile)) continue;
+        try { store.removeFile(previousOutputFile); }
+        catch (error) { appendServerLog(`old output cleanup failed: ${error.message}`); }
+      }
+    }
+    return sendJson(res, 200, store.publicTask(savedTask));
   } catch (error) {
     appendServerLog(`cache output failed: ${error.message}`);
     return sendJson(res, 500, { error: { message: error.message } });
@@ -533,7 +570,9 @@ function sendCachedFile(res, kind, id, url) {
     filePath = outputFiles[index];
     type = outputTypes[index];
   }
-  if (!filePath || !fs.existsSync(filePath)) return sendJson(res, 404, { error: { message: "缓存文件不存在" } });
+  if (!filePath || !store.isInsideCache(filePath) || !fs.existsSync(filePath)) {
+    return sendJson(res, 404, { error: { message: "缓存文件不存在" } });
+  }
   return send(res, 200, fs.readFileSync(filePath), { "Content-Type": type || "application/octet-stream" });
 }
 
@@ -550,26 +589,54 @@ function deleteTask(res, url) {
   return sendJson(res, 200, { ok: true });
 }
 
-// 清空任务列表及全部输入、输出缓存文件。
+// 兼容清理旧版侵权拼图目录 runtime/test/check（新路径已并入 cache/check）。
+function clearLegacyInfringementContactSheets() {
+  const legacyDir = path.resolve(RUNTIME_ROOT, "test", "check");
+  const rootPrefix = `${path.resolve(ROOT)}${path.sep}`.toLowerCase();
+  if (!legacyDir.toLowerCase().startsWith(rootPrefix)) return 0;
+  if (!fs.existsSync(legacyDir)) return 0;
+  return store.emptyDirectory(legacyDir);
+}
+
+// 清空任务列表，并删除整个 runtime/cache（含 input/output/check）。
 function clearTasks(res) {
+  const taskCount = store.list().length;
+  // 先按任务记录删一遍，再整目录扫清 cache（含侵权拼图 check）。
   for (const task of store.list()) {
     store.removeFile(task.inputFile);
     const outputFiles = store.outputFilesForTask(task);
     for (const outputFile of outputFiles) store.removeFile(outputFile);
   }
+  const cacheRemoved = store.clearAllCacheFiles();
+  const legacyRemoved = clearLegacyInfringementContactSheets();
   store.clear();
-  return sendJson(res, 200, { ok: true });
+  const checkRelative = path.relative(ROOT, store.CHECK_DIR).replace(/\\/g, "/");
+  appendServerLog(
+    `cache cleared: tasks=${taskCount}, cacheFiles=${cacheRemoved}, legacyCheck=${legacyRemoved}, checkDir=${checkRelative}`
+  );
+  return sendJson(res, 200, {
+    ok: true,
+    tasksCleared: taskCount,
+    cacheFilesRemoved: cacheRemoved,
+    contactSheetsRemoved: legacyRemoved,
+    contactSheetDir: checkRelative
+  });
 }
 
 async function proxyImageEdit(req, res) {
   const config = getConfig().patternRedraw.imageApi;
   if (!config.apiKey) {
-    return sendJson(res, 500, { error: { message: "runtime/config.json 未配置图片中转 API Key，请点击左上角配置文件导入", type: "proxy_config_error" } });
+    return sendJson(res, 500, { error: { message: "key.json 的 trans_model_keys 未配置当前节点 API Key", type: "proxy_config_error" } });
   }
   let body;
   try { body = await readBody(req); }
   catch (error) { return sendJson(res, 413, { error: { message: error.message, type: "proxy_body_error" } }); }
   const target = `${config.baseUrl}${config.endpoint}`;
+  const clientController = new AbortController();
+  const abortClientRequest = clientController.abort.bind(clientController);
+  const timeoutSignal = AbortSignal.timeout(IMAGE_EDIT_TIMEOUT_MS);
+  const upstreamSignal = AbortSignal.any([clientController.signal, timeoutSignal]);
+  res.once("close", abortClientRequest);
   try {
     const upstream = await fetch(target, {
       method: "POST",
@@ -577,7 +644,8 @@ async function proxyImageEdit(req, res) {
         "Authorization": `Bearer ${config.apiKey}`,
         "Content-Type": req.headers["content-type"] || "application/octet-stream"
       },
-      body
+      body,
+      signal: upstreamSignal
     });
     const upstreamBody = Buffer.from(await upstream.arrayBuffer());
     return send(res, upstream.status, upstreamBody, {
@@ -586,10 +654,17 @@ async function proxyImageEdit(req, res) {
     });
   } catch (error) {
     appendServerLog(`image API proxy failed: ${error.message}`);
-    return sendJson(res, 502, {
-      error: { message: error.message || String(error), type: error.name || "ProxyFetchError" },
+    if (res.destroyed) return;
+    const timedOut = timeoutSignal.aborted;
+    return sendJson(res, timedOut ? 504 : 502, {
+      error: {
+        message: timedOut ? "图片生成请求超过 5 分钟" : (error.message || String(error)),
+        type: timedOut ? "ImageRequestTimeout" : (error.name || "ProxyFetchError")
+      },
       proxy: { target }
     });
+  } finally {
+    res.removeListener("close", abortClientRequest);
   }
 }
 
@@ -602,16 +677,96 @@ function normalizeInfringementItems(value) {
   })).filter((item) => item.number && item.reason);
 }
 
-// 将浏览器生成的侵权审核拼图保存到项目配置的后台目录。
+// 去掉 Markdown 代码块外壳，尽量拿到可 JSON.parse 的正文。
+function stripJsonFences(text) {
+  let cleaned = String(text || "").trim();
+  if (cleaned.startsWith("```json")) cleaned = cleaned.slice(7);
+  else if (cleaned.startsWith("```")) cleaned = cleaned.slice(3);
+  if (cleaned.endsWith("```")) cleaned = cleaned.slice(0, -3);
+  return cleaned.trim();
+}
+
+// 从模型文本中提取第一个完整 JSON 对象或数组（兼容前后夹杂说明文字）。
+function extractJsonPayload(text) {
+  const cleaned = stripJsonFences(text);
+  if (!cleaned) return null;
+  try {
+    return JSON.parse(cleaned);
+  } catch {
+    // 继续尝试从混合文本中截取首个 JSON 片段。
+  }
+  const objectStart = cleaned.indexOf("{");
+  const arrayStart = cleaned.indexOf("[");
+  let start = -1;
+  if (objectStart >= 0 && (arrayStart < 0 || objectStart < arrayStart)) start = objectStart;
+  else if (arrayStart >= 0) start = arrayStart;
+  if (start < 0) return null;
+  const stack = [];
+  let inString = false;
+  let escaped = false;
+  for (let index = start; index < cleaned.length; index += 1) {
+    const char = cleaned[index];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = true;
+      else if (char === "\"") inString = false;
+      continue;
+    }
+    if (char === "\"") {
+      inString = true;
+      continue;
+    }
+    if (char === "{" || char === "[") stack.push(char);
+    if (char === "}" || char === "]") {
+      const open = stack.pop();
+      if ((char === "}" && open !== "{") || (char === "]" && open !== "[")) return null;
+      if (!stack.length) {
+        try {
+          return JSON.parse(cleaned.slice(start, index + 1));
+        } catch {
+          return null;
+        }
+      }
+    }
+  }
+  return null;
+}
+
+// 兼容 content 为空、只有 reasoning_content，或返回数组 / {items:[]} 多种形态。
+function parseInfringementModelResult(message) {
+  const content = message && typeof message.content === "string" ? message.content : "";
+  const reasoning = message && typeof message.reasoning_content === "string"
+    ? message.reasoning_content
+    : (message && typeof message.reasoning === "string" ? message.reasoning : "");
+  const candidates = [content, reasoning].filter((text) => String(text || "").trim());
+  if (!candidates.length) {
+    throw new Error("Moonshot 未返回审核结果：content 与 reasoning_content 均为空");
+  }
+  for (let index = 0; index < candidates.length; index += 1) {
+    const parsed = extractJsonPayload(candidates[index]);
+    if (parsed === null) continue;
+    if (Array.isArray(parsed)) return { items: parsed };
+    if (parsed && typeof parsed === "object") {
+      if (Array.isArray(parsed.items)) return parsed;
+      // 兼容偶发的 results/risks 字段名。
+      if (Array.isArray(parsed.results)) return { items: parsed.results };
+      if (Array.isArray(parsed.risks)) return { items: parsed.risks };
+    }
+  }
+  const preview = String(candidates[0]).replace(/\s+/g, " ").trim().slice(0, 240);
+  throw new Error(`Moonshot 审核结果不是合法 JSON：${preview || "(空白 content)"}`);
+}
+
+// 将浏览器生成的侵权审核拼图保存到 runtime/cache/check。
 function saveInfringementContactSheet(image, page) {
   const config = getConfig().patternRedraw.infringement;
   if (!config.saveContactSheet) return "";
   const match = image.match(/^data:image\/(png|jpe?g|webp);base64,([A-Za-z0-9+/=]+)$/i);
   if (!match) throw new Error("缺少合法的合并图片");
   const extension = /^jpe?g$/i.test(match[1]) ? ".jpg" : `.${match[1].toLowerCase()}`;
-  const outputDir = path.resolve(ROOT, config.outputDir);
-  const rootPrefix = `${ROOT}${path.sep}`.toLowerCase();
-  if (!outputDir.toLowerCase().startsWith(rootPrefix)) throw new Error("侵权拼图输出目录必须位于项目内");
+  // 固定写入 cache/check；配置若异常则回退到 store.CHECK_DIR。
+  let outputDir = path.resolve(ROOT, config.outputDir || "runtime/cache/check");
+  if (!store.isInsideCache(outputDir)) outputDir = store.CHECK_DIR;
   fs.mkdirSync(outputDir, { recursive: true });
   const pageNumber = Math.max(1, Math.floor(Number(page || 1)));
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
@@ -625,6 +780,7 @@ function saveInfringementContactSheet(image, page) {
 async function checkInfringement(req, res) {
   const fullConfig = getConfig();
   const config = fullConfig.shared.moonshot;
+  const infringementConfig = fullConfig.patternRedraw.infringement;
   let payload;
   try { payload = await readJsonBody(req, 35 * 1024 * 1024); }
   catch (error) { return sendJson(res, 400, { error: { message: error.message, type: "bad_json" } }); }
@@ -641,63 +797,94 @@ async function checkInfringement(req, res) {
   }
   if (!config.apiKey) {
     return sendJson(res, 500, {
-      error: { message: "runtime/config.json 未配置 Moonshot API Key", type: "moonshot_config_error" },
+      error: { message: "key.json 未配置 apikey", type: "moonshot_config_error" },
       savedContactSheet
     });
   }
   const target = `${config.baseUrl}/chat/completions`;
+  // 侵权审核需要稳定 JSON，不走深度推理；否则 reasoning 会吃光 max_tokens，content 只剩空白。
   const requestBody = {
     model: config.model,
     messages: [
       {
         role: "system",
-        content: "你是图片侵权风险审核助手。仅列出有明确或较高可能侵权风险的图片编号；编号来自图片左上角标签。没有风险项时返回空数组。reason 用简短中文说明依据；risk 只能是低、中、高。不要臆测无法从图中识别的信息。"
+        content: infringementConfig.prompt
       },
       {
         role: "user",
         content: [
           { type: "image_url", image_url: { url: image } },
-          { type: "text", text: "请审核这张合并图，并按既定 JSON Schema 返回。" }
+          {
+            type: "text",
+            text: "请审核这张合并图。只输出 JSON，格式必须是 {\"items\":[{\"number\":\"编号\",\"reason\":\"原因\",\"risk\":\"低|中|高\"}]}；无风险时输出 {\"items\":[]}。"
+          }
         ]
       }
     ],
     response_format: INFRINGEMENT_RESPONSE_FORMAT,
-    max_tokens: 2048
+    temperature: 0.6,
+    max_tokens: 8192,
+    thinking: { type: "disabled" }
   };
+  const timeoutSignal = AbortSignal.timeout(INFRINGEMENT_TIMEOUT_MS);
+  let upstreamStatus = 0;
+  let upstreamHeaders = {};
+  let upstreamRaw = "";
   try {
     const upstream = await fetch(target, {
       method: "POST",
       headers: { "Authorization": `Bearer ${config.apiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify(requestBody)
+      body: JSON.stringify(requestBody),
+      signal: timeoutSignal
     });
-    const raw = await upstream.text();
+    upstreamStatus = upstream.status;
+    upstreamHeaders = headersToLogObject(upstream.headers);
+    upstreamRaw = await upstream.text();
     if (!upstream.ok) {
       return sendJson(res, upstream.status, {
-        error: { message: raw.slice(0, 1000), type: "moonshot_upstream_error" },
-        savedContactSheet
+        error: { message: upstreamRaw.slice(0, 1000), type: "moonshot_upstream_error" },
+        savedContactSheet,
+        timeoutMs: INFRINGEMENT_TIMEOUT_MS,
+        upstream: {
+          status: upstreamStatus,
+          headers: upstreamHeaders,
+          body: upstreamRaw.slice(0, 2000)
+        }
       });
     }
-    const response = JSON.parse(raw);
-    const content = response && response.choices && response.choices[0] && response.choices[0].message && response.choices[0].message.content;
-    if (!content) throw new Error("Moonshot 未返回审核结果");
-    const result = JSON.parse(content);
+    const response = JSON.parse(upstreamRaw);
+    const message = response && response.choices && response.choices[0] && response.choices[0].message;
+    const result = parseInfringementModelResult(message);
     return sendJson(res, 200, { ok: true, items: normalizeInfringementItems(result.items), savedContactSheet });
   } catch (error) {
-    appendServerLog(`Moonshot infringement check failed: ${error.message}`);
-    return sendJson(res, 502, {
-      error: { message: error.message, type: error.name || "MoonshotProxyError" },
-      savedContactSheet
+    const timedOut = timeoutSignal.aborted;
+    const message = timedOut ? "Moonshot 侵权审核请求超过 20 分钟" : error.message;
+    appendServerLog(
+      `Moonshot infringement check failed: ${message}\n` +
+      `Upstream status: ${upstreamStatus || "未收到"}\n` +
+      `Upstream headers: ${JSON.stringify(upstreamHeaders)}\n` +
+      `Upstream body: ${upstreamRaw.slice(0, 2000)}`
+    );
+    return sendJson(res, timedOut ? 504 : 502, {
+      error: {
+        message,
+        type: timedOut ? "MoonshotInfringementTimeout" : (error.name || "MoonshotProxyError")
+      },
+      savedContactSheet,
+      timeoutMs: INFRINGEMENT_TIMEOUT_MS,
+      upstream: {
+        status: upstreamStatus,
+        headers: upstreamHeaders,
+        body: upstreamRaw.slice(0, 2000)
+      }
     });
   }
 }
 
-// 从模型响应文本中解析结构化 JSON，并兼容 Markdown 代码块。
+// 从模型响应文本中解析结构化 JSON，复用侵权审核的稳健提取逻辑。
 function parseElementModelJson(content) {
-  let cleaned = String(content || "").trim();
-  if (cleaned.startsWith("```json")) cleaned = cleaned.slice(7);
-  else if (cleaned.startsWith("```")) cleaned = cleaned.slice(3);
-  if (cleaned.endsWith("```")) cleaned = cleaned.slice(0, -3);
-  const parsed = JSON.parse(cleaned.trim());
+  const parsed = extractJsonPayload(content);
+  if (parsed === null) throw new Error("Moonshot 元素提取结果不是合法 JSON");
   return Array.isArray(parsed) ? { items: parsed } : parsed;
 }
 
@@ -756,7 +943,7 @@ async function extractElements(req, res) {
   if (!moonshot.apiKey) {
     appendServerLog(`[element-extract][${requestId}] 配置校验失败：shared.moonshot.apiKey 未配置`);
     return sendJson(res, 500, {
-      error: { message: "runtime/config.json 未配置 shared.moonshot.apiKey", type: "moonshot_config_error" },
+      error: { message: "key.json 未配置 apikey", type: "moonshot_config_error" },
       requestId
     });
   }
@@ -922,15 +1109,20 @@ async function extractElements(req, res) {
   }
 }
 
+const PROXY_IMAGE_TIMEOUT_MS = 45 * 1000;
+const PROXY_IMAGE_MAX_BYTES = 25 * 1024 * 1024;
+
 async function proxyImageDownload(req, res, url) {
   const remoteUrl = url.searchParams.get("url") || "";
   let parsed;
   try { parsed = new URL(remoteUrl); }
   catch { return sendJson(res, 400, { error: { message: "proxy-image 缺少合法 url", type: "bad_url" } }); }
   if (!["http:", "https:"].includes(parsed.protocol)) return sendJson(res, 400, { error: { message: "只允许代理 http/https 图片" } });
+  // 本地环回代理不拦内网；仍限制超时与体积，避免挂死或吃光内存。
   try {
     const upstream = await fetch(parsed.href, {
       redirect: "follow",
+      signal: AbortSignal.timeout(PROXY_IMAGE_TIMEOUT_MS),
       headers: {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126 Safari/537.36",
         "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
@@ -940,14 +1132,28 @@ async function proxyImageDownload(req, res, url) {
       }
     });
     const contentType = upstream.headers.get("content-type") || "application/octet-stream";
+    const contentLength = Number(upstream.headers.get("content-length") || 0);
+    if (contentLength > PROXY_IMAGE_MAX_BYTES) {
+      return sendJson(res, 413, {
+        error: { message: `代理图片过大：${contentLength} bytes（上限 ${PROXY_IMAGE_MAX_BYTES}）`, type: "too_large" },
+        proxy: { target: remoteUrl }
+      });
+    }
     const body = Buffer.from(await upstream.arrayBuffer());
+    if (body.length > PROXY_IMAGE_MAX_BYTES) {
+      return sendJson(res, 413, {
+        error: { message: `代理图片过大：${body.length} bytes（上限 ${PROXY_IMAGE_MAX_BYTES}）`, type: "too_large" },
+        proxy: { target: remoteUrl }
+      });
+    }
     if (!upstream.ok) return send(res, upstream.status, body, { "Content-Type": contentType });
     if (!/^image\//i.test(contentType)) {
       return sendJson(res, 502, { error: { message: `远程地址返回的不是图片：${contentType} | ${body.toString("utf8", 0, 300)}`, type: "not_image_response" } });
     }
     return send(res, 200, body, { "Content-Type": contentType, "X-Proxy-Image-Target": parsed.origin });
   } catch (error) {
-    return sendJson(res, 502, { error: { message: error.message, type: error.name || "ProxyFetchError" }, proxy: { target: remoteUrl } });
+    const type = error.name === "TimeoutError" || error.name === "AbortError" ? "proxy_timeout" : (error.name || "ProxyFetchError");
+    return sendJson(res, 502, { error: { message: error.message, type }, proxy: { target: remoteUrl } });
   }
 }
 
@@ -979,10 +1185,34 @@ async function handleConfig(req, res) {
   if (req.method === "GET") return sendJson(res, 200, publicConfig());
   try {
     const config = replaceConfig(await readJsonBody(req, 512 * 1024));
-    appendServerLog("runtime/config.json updated from UI");
+    appendServerLog("config.json updated from UI");
     return sendJson(res, 200, publicConfig(config));
   } catch (error) {
     return sendJson(res, 400, { error: { message: error.message, type: "config_error" } });
+  }
+}
+
+// 从页面载入 Moonshot 小写凭据与节点密钥映射，并刷新当前内存配置。
+async function handleKeys(req, res) {
+  try {
+    const config = replaceKeyConfig(await readJsonBody(req, 512 * 1024));
+    appendServerLog("key.json loaded from UI");
+    return sendJson(res, 200, publicConfig(config));
+  } catch (error) {
+    return sendJson(res, 400, { error: { message: error.message, type: "key_config_error" } });
+  }
+}
+
+// 手动切换图片生成中转节点，并将选择持久化到 config.json。
+async function handleTransModelNode(req, res) {
+  try {
+    const payload = await readJsonBody(req, 64 * 1024);
+    const requestedId = String(payload.nodeId || "").trim();
+    const config = requestedId ? selectTransModelNode(requestedId) : selectNextTransModelNode();
+    appendServerLog(`trans model node switched: ${config.trans_model_pool.active}`);
+    return sendJson(res, 200, publicConfig(config));
+  } catch (error) {
+    return sendJson(res, 400, { error: { message: error.message, type: "trans_model_node_error" } });
   }
 }
 
@@ -1114,6 +1344,16 @@ function serveElementExtractionScript(res) {
   }
 }
 
+// 从独立 workflow 目录发送跨模块工作流管理器脚本。
+function serveWorkflowManagerScript(res) {
+  try {
+    const data = fs.readFileSync(path.join(ROOT, "app", "workflow", "workflow-manager.js"));
+    return send(res, 200, data, { "Content-Type": "text/javascript; charset=utf-8" });
+  } catch (error) {
+    return sendJson(res, 404, { error: { message: "找不到 workflow 管理器脚本", type: "not_found" } });
+  }
+}
+
 const startupConfig = getConfig();
 const host = startupConfig.shared.server.host;
 const port = startupConfig.shared.server.port;
@@ -1124,7 +1364,10 @@ const server = http.createServer(async (req, res) => {
   if (req.method === "GET" && (url.pathname === "/mockup" || url.pathname === "/mockup/")) return serveMockupHtml(res);
   if (req.method === "GET" && url.pathname === "/app/vendor/jszip.min.js") return serveJsZipScript(res);
   if (req.method === "GET" && url.pathname === "/app/element-extraction.js") return serveElementExtractionScript(res);
+  if (req.method === "GET" && url.pathname === "/app/workflow/workflow-manager.js") return serveWorkflowManagerScript(res);
   if ((req.method === "GET" || req.method === "POST") && ["/config", "/api/config"].includes(url.pathname)) return handleConfig(req, res);
+  if (req.method === "POST" && url.pathname === "/api/keys") return handleKeys(req, res);
+  if (req.method === "POST" && url.pathname === "/api/trans-model-node") return handleTransModelNode(req, res);
   if ((req.method === "GET" || req.method === "POST") && url.pathname === "/api/element-products") return handleElementProducts(req, res);
   if (req.method === "GET" && ["/health", "/api/health"].includes(url.pathname)) return sendJson(res, 200, publicConfig());
   if (req.method === "GET" && url.pathname === "/api/events") return sse.connect(req, res);
@@ -1148,13 +1391,20 @@ const server = http.createServer(async (req, res) => {
   return sendJson(res, 404, { error: { message: "Not found", type: "not_found" } });
 });
 
+// Node 默认 requestTimeout=300000(5 分钟)，长耗时侵权审核会在 8787 侧被掐断；统一抬到覆盖 20 分钟上游。
+server.requestTimeout = SERVER_REQUEST_TIMEOUT_MS;
+server.headersTimeout = SERVER_REQUEST_TIMEOUT_MS + 10 * 1000;
+server.timeout = 0;
+
 server.on("error", (error) => {
   appendServerLog(`server error: ${error.stack || error.message}`);
   console.error(error);
 });
 
 server.listen(port, host, () => {
-  appendServerLog(`started on http://${host}:${port}`);
+  appendServerLog(
+    `started on http://${host}:${port}; requestTimeout=${server.requestTimeout}ms; infringementTimeout=${INFRINGEMENT_TIMEOUT_MS}ms`
+  );
   console.log(`POD server: http://${host}:${port}/`);
   console.log(`Runtime: ${RUNTIME_ROOT}`);
 });

@@ -9,7 +9,7 @@
 [![No Dependencies](https://img.shields.io/badge/npm_dependencies-0-1f883d)](#快速开始)
 [![Local First](https://img.shields.io/badge/data-local_only-f97316)](#数据与安全)
 
-[快速开始](#快速开始) · [安装扩展](#安装-chrome-扩展) · [导入数据](#json-导入) · [接口说明](#http-与-sse) · [故障排查](#故障排查)
+[快速开始](#快速开始) · [三模块 Workflow](#三模块-workflow) · [安装扩展](#安装-chrome-扩展) · [导入数据](#json-导入) · [接口说明](#http-与-sse) · [故障排查](#故障排查)
 
 </div>
 
@@ -25,12 +25,14 @@ POD Image Workflow 把 **Temu 图片采集 Chrome 扩展**、**印花重绘**、
 |---|---|
 | 商品采集 | 获取 `imageurl`、`listing` 和编号，按完整图片 URL 精确去重 |
 | 原图缓存 | JSON 导入最多 10 并发；502/503/504 或网络超时仅重试一次 |
-| 批量生图 | 默认 3 并发、每次返回 4 张，支持停止、重发和按当前提示词重新生成 |
+| 批量生图 | 默认 3 并发、生成数量手输 1–4，支持取消、重发和按当前提示词重新生成 |
 | 元素提取 | 每 9 张组成 3×3 标号图，默认 3 并发调用 Moonshot，结果可编辑并导出 |
 | 套图生成 | 单工作区配置印花文件夹与多组底图/Mask，支持位置、缩放、旋转、混合、置换和曲线后导出 ZIP |
+| Workflow | 模块 1 生成图批量传入模块 2，模块 2 重命名后的完成图批量传入模块 3 |
 | 状态恢复 | 输入图、生成图、提示词、日志和任务状态全部持久化 |
 | 文件下载 | 使用 `listing` 商品标题命名，只保存图片，不生成 TXT |
-| 联系表 | 当前页 50 张，10×5 排列，审核图由后台保存到 `runtime/test/check/` |
+| 联系表 | 当前页 50 张，10×5 排列，审核图保存到 `runtime/cache/check/` |
+| 缓存清空 | 点「清空」删除任务列表，并清空整个 `runtime/cache/`（含 input / output / check） |
 
 ## 工作流程
 
@@ -43,12 +45,15 @@ flowchart LR
     D -->|SSE 实时推送| F["POD 工作台"]
     F -->|手动生成| G["BeeCode"]
     G -->|返回图片| H["runtime/cache/output"]
+    H -->|批量传输，每个任务取第一张| I["模块 2：元素提取"]
+    I -->|完成并按最终名称重命名| J["模块 3：套图生成印花组"]
 ```
 
 - 服务在线：采集后立即同步到 POD。
 - 服务离线：扩展保留数据并显示“待同步”。
 - 再次打开 POD：`pod-bridge.js` 一次性提交旧缓存，不轮询页面。
 - URL 重复：按钮直接显示“重复”，不会加入 JSON，也不会再次 POST。
+- Workflow 传输：只在当前浏览器会话中保存，刷新页面后需要从源模块重新传输。
 
 ## 快速开始
 
@@ -70,10 +75,10 @@ start.cmd
 
 脚本将自动：
 
-1. 检查 `http://127.0.0.1:8787/api/health`。
-2. 服务未运行时，在后台启动 `node server/index.js`。
-3. 等待健康检查通过。
-4. 打开 `http://127.0.0.1:8787/`。
+1. 检查 `127.0.0.1:8787` 是否已有监听进程。
+2. 如果端口由旧 POD Node 服务占用，先结束旧进程。
+3. 在后台重新启动 `node server/index.js`。
+4. 等待健康检查通过后打开 `http://127.0.0.1:8787/`。
 
 也可以在项目根目录手动启动：
 
@@ -83,25 +88,24 @@ node server/index.js
 
 ## 配置
 
-运行时只读取这一份实际配置：
+业务配置与密钥配置已经分离：
 
 ```text
-runtime/config.json
+config.json
+key.json
 ```
 
 首次使用：
 
-1. 参考 `config/config.example.json` 创建配置文件。
-2. 填入 BeeCode 与 Moonshot API Key。
-3. 在 POD 页面点击“配置文件”并导入。
-4. 后台校验后原子写入 `runtime/config.json`，以后刷新或重启不需要重复选择。
+1. `config.json` 保存全部业务配置，以及不含密钥的图片中转节点池 `trans_model_pool`。
+2. 每个节点包含 `id`、`name`、`baseurl`、`endpoint`、`model` 和 `price`。
+3. 复制 `key.example.json` 为 `key.json`，填写 Moonshot 的 `baseurl`、`apikey`，并在 `trans_model_keys` 中按节点 ID 填写生图密钥；也可以在页面点击“载入密码”导入。
+4. 多节点时点击“选择节点”，在气泡菜单中手动选择目标节点；选择结果会立即生效并保存到 `config.json`。
 
 ```json
 {
   "shared": {
     "moonshot": {
-      "apiKey": "",
-      "baseUrl": "https://api.moonshot.cn/v1",
       "model": "kimi-k2.6"
     },
     "server": {
@@ -111,8 +115,6 @@ runtime/config.json
   },
   "patternRedraw": {
     "imageApi": {
-      "apiKey": "",
-      "baseUrl": "https://beecode.cc",
       "endpoint": "/v1/images/edits",
       "model": "gpt-image-2",
       "size": "1024x1024",
@@ -127,7 +129,8 @@ runtime/config.json
     },
     "infringement": {
       "saveContactSheet": true,
-      "outputDir": "runtime/test/check"
+      "outputDir": "runtime/cache/check",
+      "prompt": "侵权审核系统提示词..."
     }
   },
   "elementExtraction": {
@@ -143,13 +146,43 @@ runtime/config.json
       "地垫": "地垫 Listing 的业务规则..."
     },
     "prompt_prefix_model": "前后缀模式使用的固定后台提示词..."
+  },
+  "trans_model_pool": {
+    "active": "node-1",
+    "nodes": [
+      {
+        "id": "node-1",
+        "name": "节点1-beecode",
+        "baseurl": "https://beeapi.ai",
+        "endpoint": "/v1/images/edits",
+        "model": "gpt-image-2",
+        "price": {
+          "1k": 0.02,
+          "2k": 0.04,
+          "4K": 0.08
+        }
+      }
+    ]
   }
 }
 ```
 
-`shared` 放“印花重绘”和“元素提取”共用的 Moonshot 与服务配置；`patternRedraw` 对应“印花重绘”；`elementExtraction` 对应“元素提取”。“套图生成”当前完全在浏览器内存中运行，不读取或写入配置。`prompt_prefix_model` 不显示为页面输入框，但会由前端注入当前批次货号后与图片一起发送给本地后台。Listing 产品由根目录 `config.json` 中的 `product_prompts` 管理；页面“管理产品”弹窗新增、修改或删除产品时只会原子更新根目录的这些产品字段，API Key 仍由 `runtime/config.json` 管理。`n` 控制每次返回数量（1–4），`sizes` 将页面比例直接映射到 `/v1/images/edits` 的 `size`。旧版顶层 `imageApi`、`moonshot`、`infringement`、`server` 和 `beecode` 字段仍可读取；模块 2 的旧 `prompt` 字段会在启动时替换为新的固定模板。
+```json
+{
+  "baseurl": "https://api.moonshot.cn/v1",
+  "apikey": "",
+  "trans_model_keys": {
+    "node-1": "",
+    "node-2": "",
+    "node-3": "",
+    "node-4": ""
+  }
+}
+```
 
-`runtime/` 已被 Git 整目录忽略。接口和页面只返回脱敏 Key，完整 Key 不会出现在仓库或浏览器响应中。
+`shared` 放“印花重绘”和“元素提取”共用的模型与服务配置；`patternRedraw` 对应“印花重绘”；`elementExtraction` 对应“元素提取”；`trans_model_pool` 保存生图节点列表和当前节点。“套图生成”当前完全在浏览器内存中运行，不读取或写入配置。`prompt_prefix_model` 不显示为页面输入框，但会由前端注入当前批次货号后与图片一起发送给本地后台。Listing 产品由根目录 `config.json` 中的 `product_prompts` 管理；页面“管理产品”弹窗新增、修改或删除产品时只会原子更新根目录的这些产品字段。`n` 控制每次返回数量（1–4），`sizes` 将页面比例直接映射到 `/v1/images/edits` 的 `size`。
+
+`key.json` 和 `runtime/` 均被 Git 忽略。Moonshot 与图片中转节点的完整 API Key 都只保存在 `key.json`；`config.json` 可以安全保留节点地址、模型和价格。接口和页面只返回脱敏 Key。
 
 ## 安装 Chrome 扩展
 
@@ -193,7 +226,12 @@ JSON 导入只缓存原图，不会自动进入付费生图队列。
 - 生成请求动态读取任务当前提示词，只注入相似度强约束；比例直接映射到接口 `size`。
 - 每个任务缓存接口返回的全部图片，预览区可左右轮换。
 - 临时生成错误进入重试队列，等待 3 秒且最多重试一次。
+- 单次图片生成请求最多等待 5 分钟；点击“停止”会取消在途请求，任务恢复为“待生成”且不会计入失败或自动重试。
+- 输入图和生成图采用先写新版本、再切换任务引用的方式缓存，重新生成写入失败时保留原有图片。
 - 支持单张生成、批量生成、停止、重新生成、重新获取、下载和删除。
+- 顶部“批量传输”遍历全部分页中的已完成任务，每个任务只取第一张生成图；文件名优先使用 `displayCode` / `sourceCode` / 任务 id，避免跨任务同名覆盖。
+- 传输失败的图片直接跳过，不阻塞其他图片；按钮旁显示成功、跳过和失败数量。
+- 点右上角「清空」会先停止进行中的生成，再删除全部任务，并清空磁盘上的 `runtime/cache/`（原图、生成图、侵权拼图）。
 
 ### 下载
 
@@ -217,11 +255,11 @@ JSON 导入只缓存原图，不会自动进入付费生图队列。
 
 每张图片等比铺满并居中裁切；左上角使用约 52px 白色粗体编号，编号读取任务 `displayCode` 或 JSON `编号` 后缀。缺图会写入任务日志，但不会阻塞其他图片输出。
 
-浏览器不会再下载合并图。合并图缩放至 4K 以内后由后台保存到 `patternRedraw.infringement.outputDir`（默认 `runtime/test/check/`），并发送到 Moonshot 中国区的 `kimi-k2.6` 进行侵权风险审核。审核结果以气泡卡片显示编号、风险等级和原因；没有发现风险项时也会显示明确结果。
+浏览器不会再下载合并图。合并图缩放至 4K 以内后由后台保存到 `runtime/cache/check/`（与任务图同属 Cache，点「清空」一并删除），并发送到 Moonshot 中国区的 `kimi-k2.6` 进行侵权风险审核。审核规则读取 `patternRedraw.infringement.prompt`。审核请求超时为 **20 分钟**（本机 Node `requestTimeout` 同步覆盖）；失败卡片会显示上游 HTTP 状态、响应头和截断后的响应正文。审核结果以气泡卡片显示编号、风险等级和原因；没有发现风险项时也会显示明确结果。
 
 ## 模块 2：元素提取
 
-- 独立选择本机图片目录，不复用印花重绘任务缓存。
+- 可以独立选择本机图片目录，也可以接收模块 1 的批量传输；新批次会覆盖当前图片和提取结果。
 - 按文件名自然排序，每 9 张生成一张 3×3 标号图，文件名去除扩展名后作为货号。
 - 批次并发可选 1–4，默认 3；单批失败会标记为可重试，不阻塞其余批次。
 - 请求由后台使用 `shared.moonshot` 配置发起，完整 API Key 不进入浏览器。
@@ -233,30 +271,66 @@ JSON 导入只缓存原图，不会自动进入付费生图队列。
 - 前后缀结果和每个 Listing 产品的结果分别保存在页面内存中，切换模式或产品会恢复各自结果；重新选择图片目录时统一清空。
 - 结果仅保存在当前页面内存，可编辑后导出 JSON 或 Excel；SheetJS 未加载时自动降级为 CSV。
 - “导出图片文件夹”会将已完成原图按前后缀组合结果重命名并写入新目录；重名自动追加序号。
+- 结果区“批量传输”使用与“导出图片文件夹”完全相同的完成条件和重命名规则，直接覆盖模块 3 的“印花组”，不弹出目录选择器；成功数量以模块 3 实际载入回执为准。
 - 失败结果支持逐行“手动重试”，也可使用侧栏按钮批量重试全部未识别项。
+
+## 模块 3：套图生成
+
+- 使用独立 iframe 画布，当前仅保留一个套图工作区。
+- 可手动选择印花文件夹，也可接收模块 2 的批量传输。
+- Workflow 传入新图片时只覆盖“印花组”，不会清除产品底图、Mask、位置、缩放、混合模式、置换参数或明暗曲线。
+- 新印花全部完成校验后才替换旧组；坏图单独计入失败，旧 Blob URL 会在替换或页面退出时释放。
+- 传输完成后只载入图片并刷新预览，不会自动开始套图生成或导出。
+
+## 三模块 Workflow
+
+Workflow 协调逻辑集中在 `app/workflow/workflow-manager.js`，模块之间传递浏览器 `File` 对象，不需要先写入临时文件夹。
+
+### 模块 1 → 模块 2
+
+1. 在“印花重绘”完成所需任务。
+2. 点击顶部“批量传输”。
+3. 系统遍历全部任务而不是仅处理当前分页；失败、待生成或没有输出的任务会跳过。
+4. 多图任务固定传第一张；文件名使用 `displayCode` / `sourceCode` / 任务 id，保证跨任务唯一。
+5. 模块 2 的旧图片和旧结果被覆盖，页面自动切换到“元素提取”，但不会自动调用 Moonshot。
+
+### 模块 2 → 模块 3
+
+1. 完成元素提取或 Listing 生成，并按需编辑最终结果。
+2. 点击结果区“批量传输”。
+3. 系统只选择状态为“已完成”且最终名称非空的图片，按照图片文件夹导出规则生成合法且不重复的文件名。
+4. 页面自动切换到“套图生成”，新批次覆盖“印花组”，现有产品模板和效果设置保持不变。
+
+两段传输都采用“成功项继续、失败项跳过”的策略，并显示本批成功、跳过或失败数量。Workflow 数据仅存在于当前浏览器会话；刷新页面后不会自动恢复模块 2 的结果和待传批次，但模块 1 的持久化任务仍可重新传输。仅重启后台服务而不刷新页面时，当前页面内存不会立即丢失。
 
 ## 数据与安全
 
 | 路径 | 内容 | 是否提交 Git |
 |---|---|---|
-| `runtime/config.json` | 唯一实际配置和 API Key | 否 |
+| `config.json` | 业务配置与图片中转节点池 | 是 |
+| `key.json` | Moonshot 的小写凭据与 `trans_model_keys` | 否 |
 | `runtime/tasks.json` | 任务状态、提示词、listing 和日志 | 否 |
 | `runtime/cache/input/` | 原图缓存 | 否 |
 | `runtime/cache/output/` | 已付费生成的图片 | 否 |
-| `runtime/test/check/` | 侵权查询合并图 | 否 |
+| `runtime/cache/check/` | 侵权查询合并图 | 否 |
 | `runtime/logs/server.log` | 服务日志 | 否 |
 
-修改前端、刷新页面或重载扩展不会重新生成图片。不要删除 `runtime/`；需要迁移或备份时，直接复制整个目录。
+跨模块 Workflow 的 `File` 对象只存在于浏览器内存，不写入 `runtime/`。模块 1 原有任务和输出缓存仍按上表持久化；模块 2 的提取结果、模块 3 的画布状态及传输批次刷新后清空。
 
-旧 `beecode-cache/` 暂时保留为迁移备份，但当前程序不再读取它。
+修改前端、刷新页面或重载扩展不会重新生成图片。
+
+**清空缓存：** 页面右上角「清空」会删除 `runtime/tasks.json` 中的任务记录，并清空整个 `runtime/cache/`（`input` / `output` / `check`）。`runtime/logs/` 与配置文件不会被删除。需要迁移或备份时，直接复制整个 `runtime/` 目录。
 
 ## HTTP 与 SSE
 
 | 方法 | 路径 | 作用 |
 |---|---|---|
 | `GET` | `/mockup` | 独立套图生成页面 |
+| `GET` | `/app/workflow/workflow-manager.js` | 三模块会话内文件传输管理器 |
 | `GET` | `/api/health` | 健康检查和脱敏配置 |
-| `GET / POST` | `/api/config` | 读取或替换唯一配置 |
+| `GET / POST` | `/api/config` | 读取或替换业务配置 |
+| `POST` | `/api/keys` | 载入本机 `key.json` |
+| `POST` | `/api/trans-model-node` | 切换图片中转节点 |
 | `GET / POST` | `/api/element-products` | 读取或管理根目录 Listing 产品配置 |
 | `GET` | `/api/tasks` | 恢复全部任务 |
 | `POST` | `/api/intake` | 扩展单条导入 |
@@ -266,6 +340,8 @@ JSON 导入只缓存原图，不会自动进入付费生图队列。
 | `POST` | `/v1/images/edits` | BeeCode 图片编辑代理 |
 | `POST` | `/api/infringement-check` | Moonshot 合并图侵权审核代理 |
 | `POST` | `/api/element-extract` | Moonshot 3×3 元素提取代理 |
+| `DELETE` | `/cache/tasks` | 清空全部任务与 `runtime/cache/`（含侵权拼图 check） |
+| `DELETE` | `/cache/task?id=` | 删除单个任务及其输入/输出缓存文件 |
 
 SSE 事件包括：
 
@@ -288,6 +364,8 @@ POD-html/
 │  ├─ index.html                         三模块 POD 单页前端
 │  ├─ element-extraction.js              元素提取目录、批次、编辑与导出
 │  ├─ mockup.html                         独立套图画布与 ZIP 导出
+│  ├─ workflow/
+│  │  └─ workflow-manager.js             三模块会话内 File 传输协调器
 │  └─ vendor/jszip.min.js                 本地 ZIP 压缩依赖
 ├─ server/
 │  ├─ index.js                           HTTP 路由、BeeCode 代理、缓存接口
@@ -302,16 +380,18 @@ POD-html/
 │     ├─ content.js                      Temu 页面采集按钮
 │     ├─ pod-bridge.js                   打开 POD 时同步扩展旧缓存
 │     └─ popup.* / options.* / icons/
-├─ config/
-│  └─ config.example.json                可提交的无 Key 配置模板
 ├─ runtime/                              本机运行数据，Git 整目录忽略
-│  ├─ config.json                        唯一实际配置
 │  ├─ tasks.json                         任务状态和任务日志
-│  ├─ cache/input/                       原图
-│  ├─ cache/output/                      生成图
-│  ├─ test/check/                        侵权查询合并图
+│  ├─ cache/
+│  │  ├─ input/                          原图
+│  │  ├─ output/                         生成图
+│  │  └─ check/                          侵权查询合并图（随「清空」删除）
 │  └─ logs/server.log                    服务日志
 ├─ start.cmd                             Windows 一键启动
+├─ config.json                           完整业务配置与图片中转节点池
+├─ config.example.json                   完整业务配置与节点池模板
+├─ key.json                              Moonshot 与图片节点 API Key
+├─ key.example.json                      密钥结构模板
 ├─ update_plan.md                        整合设计与实施记录
 └─ README.md
 ```
@@ -323,11 +403,16 @@ POD-html/
 | 现象 | 处理方式 |
 |---|---|
 | 页面打不开 | 运行 `start.cmd`，再访问 `http://127.0.0.1:8787/api/health` |
+| 8787 端口被占用 | `start.cmd` 只会重启当前项目的 `server/index.js`；其他程序占用时不会被终止，请先处理端口冲突 |
 | 扩展显示“待同步” | 启动本机服务，然后打开或刷新 POD 页面 |
 | JSON 原图返回 502 | 后台等待 3 秒重试一次，也可以点单行“重新获取” |
-| BeeCode 请求失败 | 查看对应任务日志，HTTP 状态和响应正文都会保留 |
-| 配置不生效 | 确认 JSON 合法，并检查页面顶部配置来源是否为 `runtime/config.json` |
+| BeeCode 请求失败 | 查看对应任务日志，HTTP 状态和响应正文都会保留；超过 5 分钟会按超时处理 |
+| 侵权审核超时/空结果 | 审核最长约 20 分钟；确认 Moonshot Key 可用，并查看 `runtime/logs/server.log` |
+| 点清空后图片仍在磁盘 | 确认已刷新到最新前端，且服务已重启；应清空整个 `runtime/cache/` |
+| 配置不生效 | 检查 `config.json` 与 `key.json` 是否为合法 JSON；密钥只在 `key.json` |
 | 刷新后任务缺失 | 检查 `runtime/tasks.json` 和服务日志，不要重新生成 |
+| 批量传输数量为 0 | 模块 1 需至少有一个已完成且有输出的任务；模块 2 需至少有一个最终名称非空的已完成结果 |
+| 模块 3 未收到印花 | 确认使用 `http://127.0.0.1:8787/` 打开主页面，并刷新一次以加载最新 workflow 脚本 |
 
 ---
 

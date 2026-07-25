@@ -1,0 +1,10 @@
+{
+  "baseurl": "https://api.moonshot.cn/v1",
+  "apikey": "",
+  "trans_model_keys": {
+    "node-1": "",
+    "node-2": "",
+    "node-3": "",
+    "node-4": ""
+  }
+}

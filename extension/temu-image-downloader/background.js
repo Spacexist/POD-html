@@ -1,5 +1,14 @@
 const POD_INTAKE_URL = 'http://127.0.0.1:8787/api/intake';
 
+// 串行化对 chrome.storage.local 的读写，避免快速连点导致缓存互相覆盖。
+let storageWriteChain = Promise.resolve();
+
+function withStorageLock(fn) {
+  const run = storageWriteChain.then(fn, fn);
+  storageWriteChain = run.then(() => undefined, () => undefined);
+  return run;
+}
+
 function storageGet(area, keys) {
   return new Promise((resolve) => chrome.storage[area].get(keys, resolve));
 }
@@ -49,43 +58,47 @@ async function postToPod(item) {
 }
 
 async function handlePodMode({ url, listing }) {
-  const { cached_items: rawItems = [] } = await storageGet('local', ['cached_items']);
-  const items = Array.isArray(rawItems) ? rawItems : [];
-  const exists = items.some((item) => item && item.imageurl === url);
-  if (exists) return { success: true, cachedCount: items.length, alreadyExists: true };
+  return withStorageLock(async () => {
+    const { cached_items: rawItems = [] } = await storageGet('local', ['cached_items']);
+    const items = Array.isArray(rawItems) ? rawItems : [];
+    const exists = items.some((item) => item && item.imageurl === url);
+    if (exists) return { success: true, cachedCount: items.length, alreadyExists: true };
 
-  const item = {
-    '编号': buildSourceCode(items.length + 1),
-    listing: String(listing || '').trim(),
-    imageurl: url
-  };
-  items.push(item);
-  await storageSet('local', { cached_items: items });
+    const item = {
+      '编号': buildSourceCode(items.length + 1),
+      listing: String(listing || '').trim(),
+      imageurl: url
+    };
+    items.push(item);
+    await storageSet('local', { cached_items: items });
 
-  try {
-    const pod = await postToPod(item);
-    return { success: true, cachedCount: items.length, synced: true, podStatus: pod.status };
-  } catch (error) {
-    console.warn('[Temu POD] Server unavailable, kept in extension cache:', error.message);
-    return { success: true, cachedCount: items.length, pendingSync: true, warning: error.message };
-  }
+    try {
+      const pod = await postToPod(item);
+      return { success: true, cachedCount: items.length, synced: true, podStatus: pod.status };
+    } catch (error) {
+      console.warn('[Temu POD] Server unavailable, kept in extension cache:', error.message);
+      return { success: true, cachedCount: items.length, pendingSync: true, warning: error.message };
+    }
+  });
 }
 
 async function handleLocalMode({ url, filename, subfolder }) {
-  const { local_download_count: oldCount = 0 } = await storageGet('local', ['local_download_count']);
-  const currentCount = Number(oldCount || 0) + 1;
-  await storageSet('local', { local_download_count: currentCount });
-  const seq = String(currentCount).padStart(3, '0');
-  const folder = (subfolder || 'Temu').replace(/\\/g, '/').replace(/\/$/, '');
-  const safeName = filename || `temu_${Date.now()}`;
-  const finalFileName = `${seq}-${safeName}.jpg`;
-  const downloadId = await downloadImage({
-    url,
-    filename: `${folder}/${finalFileName}`,
-    conflictAction: 'uniquify',
-    saveAs: false
+  return withStorageLock(async () => {
+    const { local_download_count: oldCount = 0 } = await storageGet('local', ['local_download_count']);
+    const currentCount = Number(oldCount || 0) + 1;
+    await storageSet('local', { local_download_count: currentCount });
+    const seq = String(currentCount).padStart(3, '0');
+    const folder = (subfolder || 'Temu').replace(/\\/g, '/').replace(/\/$/, '');
+    const safeName = filename || `temu_${Date.now()}`;
+    const finalFileName = `${seq}-${safeName}.jpg`;
+    const downloadId = await downloadImage({
+      url,
+      filename: `${folder}/${finalFileName}`,
+      conflictAction: 'uniquify',
+      saveAs: false
+    });
+    return { success: true, downloadId, finalFileName };
   });
-  return { success: true, downloadId, finalFileName };
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {

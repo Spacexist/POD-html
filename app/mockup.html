@@ -1127,6 +1127,37 @@
         img.src = url;
       });
     }
+    /** 释放单个本地图片资源持有的 Blob URL。 */
+    function releaseAsset(asset) {
+      if (asset && typeof asset.url === "string" && asset.url.startsWith("blob:")) {
+        URL.revokeObjectURL(asset.url);
+      }
+    }
+    /** 释放资源数组中的全部 Blob URL。 */
+    function releaseAssets(assets) {
+      if (!Array.isArray(assets)) return;
+      for (let index = 0; index < assets.length; index += 1) releaseAsset(assets[index]);
+    }
+    /** 释放当前套图工作区持有的所有本地图片资源。 */
+    function releaseWorkspaceAssets() {
+      for (let factoryIndex = 0; factoryIndex < factories.length; factoryIndex += 1) {
+        const factory = factories[factoryIndex];
+        releaseAssets(factory.patterns);
+        for (let pairIndex = 0; pairIndex < factory.pairs.length; pairIndex += 1) {
+          releaseAsset(factory.pairs[pairIndex].base);
+          releaseAsset(factory.pairs[pairIndex].mask);
+        }
+      }
+      for (let itemIndex = 0; itemIndex < looseItems.length; itemIndex += 1) {
+        const item = looseItems[itemIndex];
+        if (item.type === "pair" && item.pair) {
+          releaseAsset(item.pair.base);
+          releaseAsset(item.pair.mask);
+        } else {
+          releaseAsset(item.asset);
+        }
+      }
+    }
     /** Handle this mockup workspace operation. */
     function assetFromCanvas(name, sourceCanvas) {
       return new Promise(/** Handle this UI callback. */function (resolve, reject) {
@@ -1751,28 +1782,102 @@
       renderSummary();
       factories.forEach(drawPreview);
     }
-    /** Handle this mockup workspace operation. */
-    async function handleFolder(factoryId, files) {
+    /** 将有效文件载入临时印花组，成功后再替换旧资源并返回真实统计。 */
+    async function handleFolder(factoryId, files, workflowFolderName = "") {
       const factory = getFactory(factoryId);
-      if (!factory) return;
-      const topLevel = [...files].filter(/** Handle this UI callback. */function (file) {
-        if (!validImageFile(file)) return false;
-        const path = file.webkitRelativePath || "";
-        return !path || path.split("/").filter(Boolean).length === 2;
-      }).sort(/** Handle this UI callback. */function (a, b) {
-        return collator.compare(a.name, b.name);
-      });
-      if (!topLevel.length) return showToast("文件夹第一层没有 PNG、JPG 或 WebP 图片", true);
-      try {
-        factory.patterns = await Promise.all(topLevel.map(loadFileAsset));
-        const path = topLevel[0].webkitRelativePath || "";
-        factory.patternFolderName = path ? path.split("/")[0] : "印花组";
-        factory.activePatternId = factory.patterns[0].id;
-        renderAll();
-        showToast(`${factory.name} 已载入 ${factory.patterns.length} 张印花`);
-      } catch (error) {
-        showToast(error.message, true);
+      if (!factory) throw new Error("找不到套图工作区");
+      const sourceFiles = files && typeof files.length === "number" ? files : [];
+      const topLevel = [];
+      let skipped = 0;
+      for (let index = 0; index < sourceFiles.length; index += 1) {
+        const file = sourceFiles[index];
+        if (!validImageFile(file)) {
+          skipped += 1;
+          continue;
+        }
+        const relativePath = file.webkitRelativePath || "";
+        let pathPartCount = 0;
+        if (relativePath) {
+          const pathParts = relativePath.split("/");
+          for (let partIndex = 0; partIndex < pathParts.length; partIndex += 1) {
+            if (pathParts[partIndex]) pathPartCount += 1;
+          }
+        }
+        if (relativePath && pathPartCount !== 2) {
+          skipped += 1;
+          continue;
+        }
+        topLevel.push(file);
       }
+      for (let left = 0; left < topLevel.length; left += 1) {
+        for (let right = left + 1; right < topLevel.length; right += 1) {
+          if (collator.compare(topLevel[right].name, topLevel[left].name) < 0) {
+            const current = topLevel[left];
+            topLevel[left] = topLevel[right];
+            topLevel[right] = current;
+          }
+        }
+      }
+      if (!topLevel.length) {
+        const error = "文件夹第一层没有 PNG、JPG 或 WebP 图片";
+        showToast(error, true);
+        return { accepted: 0, skipped, failed: 0, error };
+      }
+      const loadedPatterns = [];
+      let failed = 0;
+      for (let index = 0; index < topLevel.length; index += 1) {
+        try {
+          loadedPatterns.push(await loadFileAsset(topLevel[index]));
+        } catch (error) {
+          failed += 1;
+        }
+      }
+      if (!loadedPatterns.length) {
+        const error = "全部印花图片均读取失败，已保留原印花组";
+        showToast(error, true);
+        return { accepted: 0, skipped, failed, error };
+      }
+      const previousPatterns = factory.patterns;
+      factory.patterns = loadedPatterns;
+      const firstPath = topLevel[0].webkitRelativePath || "";
+      factory.patternFolderName = workflowFolderName || (firstPath ? firstPath.split("/")[0] : "印花组");
+      factory.activePatternId = factory.patterns[0].id;
+      renderAll();
+      releaseAssets(previousPatterns);
+      showToast(`${factory.name} 已载入 ${factory.patterns.length} 张印花`);
+      return { accepted: loadedPatterns.length, skipped, failed, error: "" };
+    }
+
+    /** 覆盖唯一工作区的印花组，同时保留产品模板和当前效果配置。 */
+    async function loadWorkflowPatterns(files, folderName) {
+      let factory = factories.length ? factories[0] : null;
+      if (!factory) factory = addFactoryAt(0, 0);
+      const result = await handleFolder(factory.id, files, folderName || "Workflow 印花组");
+      focusAll();
+      return result;
+    }
+
+    /** 接收主页面 workflow 发来的同源图片批次。 */
+    async function handleWorkflowPatternsMessage(event) {
+      if (event.origin !== window.location.origin) return;
+      const payload = event.data;
+      if (!payload || payload.type !== "pod-workflow-patterns") return;
+      const files = Array.isArray(payload.files) ? payload.files : [];
+      let response;
+      try {
+        response = await loadWorkflowPatterns(files, payload.folderName);
+      } catch (error) {
+        showToast(`Workflow 载入失败：${error.message}`, true);
+        response = { accepted: 0, skipped: 0, failed: files.length, error: error.message };
+      }
+      event.source.postMessage({
+        type: "pod-workflow-patterns-ack",
+        requestId: String(payload.requestId || ""),
+        accepted: Number(response.accepted || 0),
+        skipped: Number(response.skipped || 0),
+        failed: Number(response.failed || 0),
+        error: String(response.error || "")
+      }, event.origin);
     }
     /** Handle this mockup workspace operation. */
     async function assignFileToSlot(factoryId, pairId, type, file) {
@@ -1783,6 +1888,7 @@
           return item.id === pairId;
         });
         if (!factory || !pair) return;
+        releaseAsset(pair[type]);
         pair[type] = asset;
         if (type === "base") pair.name = stem(asset.name);
         if (pair.base && !pairError(pair)) factory.activePairId = pair.id;
@@ -2839,6 +2945,7 @@
     /** Handle this mockup workspace operation. */
     async function loadDemo() {
       try {
+        releaseWorkspaceAssets();
         factories = [];
         looseItems = [];
         factorySerial = 0;
@@ -3043,6 +3150,8 @@
     }
 
     window.addEventListener("resize", handleWorkspaceResize);
+    window.addEventListener("message", handleWorkflowPatternsMessage);
+    window.addEventListener("beforeunload", releaseWorkspaceAssets);
     addFactoryAt(0, 0);
     updateView();
   </script>

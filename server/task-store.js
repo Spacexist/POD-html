@@ -7,11 +7,45 @@ const TASKS_PATH = path.join(RUNTIME_ROOT, "tasks.json");
 const CACHE_ROOT = path.join(RUNTIME_ROOT, "cache");
 const INPUT_DIR = path.join(CACHE_ROOT, "input");
 const OUTPUT_DIR = path.join(CACHE_ROOT, "output");
+// 侵权拼图与任务图统一放在 cache 下，清空 Cache 时一并删除。
+const CHECK_DIR = path.join(CACHE_ROOT, "check");
+
+// 将旧版 runtime/test/check 拼图迁移到 runtime/cache/check。
+function migrateLegacyCheckDir() {
+  const legacyDir = path.join(RUNTIME_ROOT, "test", "check");
+  if (!fs.existsSync(legacyDir) || path.resolve(legacyDir) === path.resolve(CHECK_DIR)) return;
+  try {
+    const entries = fs.readdirSync(legacyDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isFile()) continue;
+      const from = path.join(legacyDir, entry.name);
+      const to = path.join(CHECK_DIR, entry.name);
+      if (fs.existsSync(to)) {
+        fs.rmSync(from, { force: true });
+        continue;
+      }
+      try {
+        fs.renameSync(from, to);
+      } catch {
+        try {
+          fs.copyFileSync(from, to);
+          fs.rmSync(from, { force: true });
+        } catch {
+          // 单文件失败不阻断启动。
+        }
+      }
+    }
+  } catch {
+    // ignore
+  }
+}
 
 // 创建任务和图片缓存所需的运行时目录。
 function ensureRuntime() {
   fs.mkdirSync(INPUT_DIR, { recursive: true });
   fs.mkdirSync(OUTPUT_DIR, { recursive: true });
+  fs.mkdirSync(CHECK_DIR, { recursive: true });
+  migrateLegacyCheckDir();
   if (!fs.existsSync(TASKS_PATH)) atomicWriteJson(TASKS_PATH, []);
 }
 
@@ -27,9 +61,14 @@ function normalizeLogs(value) {
   return Array.isArray(value) ? value.slice(0, 80).map((entry) => String(entry)) : [];
 }
 
-// 生成带更新时间和可选图片索引的缓存 URL。
+// 生成绑定实际缓存文件版本和可选图片索引的稳定 URL。
 function taskUrl(kind, task, index) {
-  const stamp = encodeURIComponent(task.updatedAt || task.createdAt || "");
+  let filePath = task.inputFile || "";
+  if (kind === "output") {
+    const outputFiles = outputFilesForTask(task);
+    filePath = outputFiles[index || 0] || "";
+  }
+  const stamp = encodeURIComponent(path.basename(filePath) || task.createdAt || "");
   const indexQuery = Number.isInteger(index) ? `index=${index}&` : "";
   return `/cache/${kind}/${encodeURIComponent(task.id)}?${indexQuery}t=${stamp}`;
 }
@@ -75,6 +114,7 @@ function publicTask(task) {
     logs: normalizeLogs(task.logs),
     retryCount: Number(task.retryCount || 0),
     retryAt: Number(task.retryAt || 0),
+    requestedOutputCount: Math.max(1, Math.floor(Number(task.requestedOutputCount || outputFiles.length || 1))),
     inputUrl: task.inputFile ? taskUrl("input", task) : "",
     outputUrl: outputUrls[0] || "",
     outputUrls,
@@ -180,11 +220,57 @@ function removeFile(filePath) {
   if (isInsideCache(filePath)) fs.rmSync(filePath, { force: true });
 }
 
+// 清空目录内全部文件/子目录，保留目录本身；返回删除条数。
+function emptyDirectory(dirPath) {
+  if (!dirPath || !fs.existsSync(dirPath)) return 0;
+  let removed = 0;
+  const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+  for (const entry of entries) {
+    const fullPath = path.join(dirPath, entry.name);
+    try {
+      fs.rmSync(fullPath, { recursive: true, force: true });
+      removed += 1;
+    } catch {
+      // 单个文件失败不阻断整次清空。
+    }
+  }
+  return removed;
+}
+
+// 清空整个 runtime/cache（input/output/check 及任意子目录/孤儿文件）。
+function clearAllCacheFiles() {
+  ensureRuntime();
+  let removed = 0;
+  try {
+    const entries = fs.readdirSync(CACHE_ROOT, { withFileTypes: true });
+    for (const entry of entries) {
+      const fullPath = path.join(CACHE_ROOT, entry.name);
+      if (!isInsideCache(fullPath)) continue;
+      try {
+        if (entry.isDirectory()) {
+          removed += emptyDirectory(fullPath);
+        } else {
+          fs.rmSync(fullPath, { force: true });
+          removed += 1;
+        }
+      } catch {
+        // 单个路径失败不阻断整次清空。
+      }
+    }
+  } catch {
+    // ignore
+  }
+  // 清空后重建标准子目录，保证后续写入可用。
+  ensureRuntime();
+  return removed;
+}
+
 module.exports = {
   TASKS_PATH,
   CACHE_ROOT,
   INPUT_DIR,
   OUTPUT_DIR,
+  CHECK_DIR,
   events,
   ensureRuntime,
   safeId,
@@ -194,7 +280,10 @@ module.exports = {
   upsert,
   remove,
   clear,
+  isInsideCache,
   removeFile,
+  emptyDirectory,
+  clearAllCacheFiles,
   publicTask,
   outputFilesForTask,
   outputTypesForTask
