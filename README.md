@@ -102,7 +102,7 @@ flowchart LR
    → 项目搬家后，再双击一次该脚本即可覆盖更新快捷方式路径。
 2. 以后只需双击桌面 **POD Workbench**（或仍双击根目录 `start.cmd`）。
 
-`start.cmd` / `start.ps1` 将自动：
+`start.cmd` 将自动（单文件 hybrid，无独立 `.ps1`）：
 
 1. 解析 Node：系统 `node` → 已有 `tools/node/node.exe` → 否则下载便携 Node v20.18.1。  
 2. **强制释放 8787**：结束所有占用该端口的进程（不限是否本项目旧实例），再启动。  
@@ -153,7 +153,7 @@ key.json
 
 首次使用：
 
-1. `config.json` 只保存业务配置（模型参数、侵权提示词、Listing 产品等），**不包含**图片中转节点列表。
+1. 仓库自带可分享的 `config.json`（模型参数、侵权提示词、Listing 产品等），**不包含**图片中转节点列表与 API Key。无单独的 `config.example.json`。
 2. 复制 `key.example.json` 为 `key.json`，填写 Moonshot 的 `baseurl`、`apikey`，并在 `trans_model_pool.nodes` 中按需增减节点（每个节点含 `id`、`name`、`baseurl`、`endpoint`、`model`、`price`、`apikey`）。也可不先拷文件，启动后在**登录主页**直接导入。
 3. 已进入工作台后，点击顶部 **「修改」** 可随时覆盖导入新的 `key.json`（弹窗选择文件）；节点列表与 Moonshot 凭据会一并刷新。
 4. 多节点时点击“选择节点”切换；当前节点 `active` 写入 `key.json`（个人偏好），不写进可分享的 `config.json`。
@@ -442,14 +442,12 @@ POD-html/
 │  │  └─ check/                          侵权查询合并图（随「清空」删除）
 │  └─ logs/server.log                    服务日志
 ├─ docs/images/                          README 架构图与界面截图
-├─ start.cmd                             Windows 一键启动入口
-├─ start.ps1                             启动逻辑：Node 解析 / 便携下载 / 起服务
+├─ start.cmd                             一键启动（hybrid：Node 解析 / 杀 8787 / 起服务）
 ├─ install-desktop.cmd                   安装桌面快捷方式并自动启动（进登录页）
 ├─ tools/node/                           便携 Node（首次自动下载，gitignore）
 ├─ config.json                           业务配置（不含节点池，可分享）
-├─ config.example.json                   业务配置模板
 ├─ key.json                              Moonshot + 动态图片节点池（含密钥，登录依据）
-├─ key.example.json                      密钥结构模板
+├─ key.example.json                      密钥结构模板（唯一 example）
 ├─ update_plan.md                        整合设计与实施记录
 └─ README.md
 ```
