@@ -507,6 +507,10 @@ async function cacheOutput(req, res) {
     };
     const files = collectOutputFiles(parsed.files);
     const previousTask = store.findById(id);
+    // 无输出文件的状态回写不得复活已删除任务（清空后延迟日志曾导致幽灵任务）。
+    if (!previousTask && !files.length) {
+      return sendJson(res, 404, { error: { message: "任务不存在或已清空，忽略状态回写", type: "task_not_found" } });
+    }
     const previousOutputFiles = previousTask ? store.outputFilesForTask(previousTask).slice() : [];
     const writtenOutputFiles = [];
     if (files.length) {

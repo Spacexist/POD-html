@@ -1371,7 +1371,7 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
     const JSON_IMPORT_MAX_RETRIES = 1;
     const TRANSLATE_CONCURRENCY = 3;
 
-    const state = { items: [], cursor: 0, running: 0, stopped: false, downloadDir: null, page: 1, pageSize: PAGE_SIZE, retryQueue: [], retryTimer: null, jsonCacheQueue: [], jsonCacheRunning: 0 };
+    const state = { items: [], cursor: 0, running: 0, stopped: false, clearing: false, downloadDir: null, page: 1, pageSize: PAGE_SIZE, retryQueue: [], retryTimer: null, jsonCacheQueue: [], jsonCacheRunning: 0 };
     const logCacheTimers = new Map();
     const promptCacheTimers = new Map();
     const activeRunControllers = new Map();
@@ -1830,23 +1830,39 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       item.logs.unshift(`[${new Date().toLocaleTimeString()}] ${message}`);
       item.logs = item.logs.slice(0, 80);
       if (options.renderNow !== false && isCurrentPageItem(item)) scheduleRender(item);
+      // 清空中或显式跳过时，禁止把日志写回服务端（否则会复活已删除任务）。
+      if (state.clearing || options.skipCache) return;
       if (item.cached || !item.file) scheduleLogCache(item);
     }
 
     function scheduleLogCache(item) {
+      if (state.clearing || !item || !item.id) return;
       clearTimeout(logCacheTimers.get(item.id));
       logCacheTimers.set(item.id, setTimeout(() => {
         logCacheTimers.delete(item.id);
+        if (state.clearing) return;
+        if (!state.items.some((entry) => entry.id === item.id)) return;
         cacheStatus(item).catch((error) => notice(`缓存任务日志失败：${error.message}`));
       }, 350));
     }
 
     function schedulePromptCache(item) {
+      if (state.clearing || !item || !item.id) return;
       clearTimeout(promptCacheTimers.get(item.id));
       promptCacheTimers.set(item.id, setTimeout(() => {
         promptCacheTimers.delete(item.id);
+        if (state.clearing) return;
+        if (!state.items.some((entry) => entry.id === item.id)) return;
         cacheStatus(item).catch((error) => notice(`缓存任务提示词失败：${error.message}`));
       }, 500));
+    }
+
+    // 取消全部待写入服务端的日志/提示词定时器，避免清空后幽灵任务回写。
+    function cancelPendingTaskCaches() {
+      for (const timer of logCacheTimers.values()) clearTimeout(timer);
+      logCacheTimers.clear();
+      for (const timer of promptCacheTimers.values()) clearTimeout(timer);
+      promptCacheTimers.clear();
     }
 
     function notice(message) {
@@ -1946,14 +1962,27 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
 
     // 将用户选择的图片初始化为可生成的本地任务。
     function addFiles(files) {
-      const images = Array.from(files).filter((file) => /^image\/(png|jpe?g|webp)$/i.test(file.type));
-      if (!images.length) return;
+      if (state.clearing) {
+        notice("正在清空缓存，请稍后再上传");
+        return;
+      }
+      const list = Array.from(files || []);
+      // 部分系统/浏览器可能不带 MIME，按扩展名兜底识别。
+      const images = list.filter((file) => {
+        if (/^image\/(png|jpe?g|webp)$/i.test(file.type || "")) return true;
+        return /\.(png|jpe?g|webp)$/i.test(file.name || "");
+      });
+      if (!images.length) {
+        notice(list.length ? "未识别到可上传图片（仅支持 png/jpg/webp）" : "未选择图片");
+        el.files.value = "";
+        return;
+      }
       for (const file of images) {
         const item = {
           id: crypto.randomUUID(),
           file,
           fileName: file.name,
-          inputType: file.type,
+          inputType: file.type || (/\.png$/i.test(file.name) ? "image/png" : /\.webp$/i.test(file.name) ? "image/webp" : "image/jpeg"),
           inputUrl: URL.createObjectURL(file),
           outputUrl: "",
           outputBlob: null,
@@ -1973,11 +2002,12 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
           logs: []
         };
         state.items.push(item);
-        taskLog(item, "新建任务", { renderNow: false });
+        taskLog(item, "新建任务", { renderNow: false, skipCache: true });
         cacheInput(item).catch((error) => taskLog(item, `缓存失败：${error.message}`));
       }
       el.files.value = "";
       render();
+      notice(`已添加 ${images.length} 张图片`);
     }
 
     function pickJsonRows(payload) {
@@ -2164,6 +2194,10 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
 
     // 缓存任务状态；传入 Blob 数组时一次上传全部生成结果。
     async function cacheStatus(item, outputBlobs) {
+      if (!item || !item.id) return;
+      if (state.clearing) return;
+      // 任务已从列表移除时禁止回写，避免清空/删除后复活幽灵任务。
+      if (!state.items.some((entry) => entry.id === item.id)) return;
       const form = new FormData();
       form.set("id", item.id);
       form.set("status", item.status);
@@ -2229,17 +2263,32 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
         try {
           const payload = JSON.parse(event.data);
           const removed = state.items.find((item) => item.id === payload.id);
-          if (removed) revokeItemOutputs(removed);
+          if (removed) {
+            clearTimeout(logCacheTimers.get(removed.id));
+            logCacheTimers.delete(removed.id);
+            clearTimeout(promptCacheTimers.get(removed.id));
+            promptCacheTimers.delete(removed.id);
+            revokeIfBlob(removed.inputUrl);
+            revokeItemOutputs(removed);
+          }
           state.items = state.items.filter((item) => item.id !== payload.id);
           clampPage();
           render();
         } catch (error) { notice(`SSE 删除解析失败：${error.message}`); }
       });
       events.addEventListener("tasks.cleared", () => {
-        for (const item of state.items) revokeItemOutputs(item);
+        state.clearing = true;
+        cancelPendingTaskCaches();
+        for (const item of state.items) {
+          revokeIfBlob(item.inputUrl);
+          revokeItemOutputs(item);
+        }
         state.items = [];
         state.page = 1;
+        state.retryQueue = [];
+        state.jsonCacheQueue = [];
         render();
+        state.clearing = false;
       });
       events.addEventListener("error", () => notice("SSE 连接暂时中断，浏览器将自动重连"));
       return events;
@@ -3180,6 +3229,10 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
     // 删除任务并释放其全部本地预览 URL。
     function deleteItem(item) {
       if (!item) return;
+      clearTimeout(logCacheTimers.get(item.id));
+      logCacheTimers.delete(item.id);
+      clearTimeout(promptCacheTimers.get(item.id));
+      promptCacheTimers.delete(item.id);
       revokeIfBlob(item.inputUrl);
       revokeItemOutputs(item);
       removeRetryQueue(item);
@@ -3235,7 +3288,8 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
     el.start.addEventListener("click", startQueue);
     el.workflowToElements.addEventListener("click", handleWorkflowToElementsClick);
     // 停止继续派发并取消所有在途生成请求，任务恢复为可再次生成状态。
-    function stopRunningTasks() {
+    function stopRunningTasks(options = {}) {
+      const skipCache = options.skipCache === true;
       state.stopped = true;
       clearRetryTimer();
       for (const activeRun of activeRunControllers.values()) {
@@ -3249,16 +3303,19 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
         item.message = "已停止，可重新生成";
         item.errorLog = "";
         item.retryAt = 0;
-        taskLog(item, "已停止并取消当前请求", { renderNow: false });
+        taskLog(item, "已停止并取消当前请求", { renderNow: false, skipCache });
       }
-      render();
+      if (!skipCache) render();
     }
 
     el.stop.addEventListener("click", stopRunningTasks);
     el.clear.addEventListener("click", async () => {
       if (!window.confirm("确定清空全部任务，并删除本地缓存图片与侵权拼图？此操作不可撤销。")) return;
-      // 先停掉进行中的生成，避免清空后后台仍写缓存。
-      stopRunningTasks();
+      // 先阻断一切回写，再停生成、取消定时器，最后删磁盘缓存。
+      state.clearing = true;
+      cancelPendingTaskCaches();
+      stopRunningTasks({ skipCache: true });
+      cancelPendingTaskCaches();
       for (const item of state.items) {
         revokeIfBlob(item.inputUrl);
         revokeItemOutputs(item);
@@ -3267,6 +3324,7 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       state.cursor = 0;
       state.page = 1;
       state.retryQueue = [];
+      state.jsonCacheQueue = [];
       clearRetryTimer();
       render();
       try {
@@ -3281,6 +3339,9 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
         notice(`已清空：任务 ${tasksCleared}，缓存文件 ${cacheFiles}，侵权拼图 ${sheets}`);
       } catch (error) {
         notice(`清空缓存失败：${error.message}`);
+      } finally {
+        state.clearing = false;
+        state.stopped = false;
       }
     });
 
