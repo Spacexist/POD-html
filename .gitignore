@@ -27,6 +27,7 @@ __pycache__/
 
 !.gitignore
 !extension/temu-image-downloader/icons/*.png
+!docs/images/*.png
 claude-beecode-image2.cmd
 claude-beecode-image2.ps1
 temu-california65-helper/
