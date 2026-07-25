@@ -97,10 +97,10 @@ key.json
 
 首次使用：
 
-1. `config.json` 保存全部业务配置，以及不含密钥的图片中转节点池 `trans_model_pool`。
-2. 每个节点包含 `id`、`name`、`baseurl`、`endpoint`、`model` 和 `price`。
-3. 复制 `key.example.json` 为 `key.json`，填写 Moonshot 的 `baseurl`、`apikey`，并在 `trans_model_keys` 中按节点 ID 填写生图密钥；也可以在页面点击“载入密码”导入。
-4. 多节点时点击“选择节点”，在气泡菜单中手动选择目标节点；选择结果会立即生效并保存到 `config.json`。
+1. `config.json` 只保存业务配置（模型参数、侵权提示词、Listing 产品等），**不包含**图片中转节点列表。
+2. 复制 `key.example.json` 为 `key.json`，填写 Moonshot 的 `baseurl`、`apikey`，并在 `trans_model_pool.nodes` 中按需增减节点（每个节点含 `id`、`name`、`baseurl`、`endpoint`、`model`、`price`、`apikey`）。
+3. 也可在页面点击“载入密码”导入 `key.json`：后台会按文件内容**动态重建**节点列表，前端“选择节点”菜单随之增减，不锁死在 `config.json`。
+4. 多节点时点击“选择节点”切换；当前节点 `active` 写入 `key.json`（个人偏好），不写进可分享的 `config.json`。
 
 ```json
 {
@@ -146,7 +146,14 @@ key.json
       "地垫": "地垫 Listing 的业务规则..."
     },
     "prompt_prefix_model": "前后缀模式使用的固定后台提示词..."
-  },
+  }
+}
+```
+
+```json
+{
+  "baseurl": "https://api.moonshot.cn/v1",
+  "apikey": "",
   "trans_model_pool": {
     "active": "node-1",
     "nodes": [
@@ -160,29 +167,17 @@ key.json
           "1k": 0.02,
           "2k": 0.04,
           "4K": 0.08
-        }
+        },
+        "apikey": ""
       }
     ]
   }
 }
 ```
 
-```json
-{
-  "baseurl": "https://api.moonshot.cn/v1",
-  "apikey": "",
-  "trans_model_keys": {
-    "node-1": "",
-    "node-2": "",
-    "node-3": "",
-    "node-4": ""
-  }
-}
-```
+`shared` 放“印花重绘”和“元素提取”共用的模型与服务配置；`patternRedraw` 对应“印花重绘”；`elementExtraction` 对应“元素提取”。图片中转节点列表在 `key.json` 的 `trans_model_pool` 中动态维护，公司可共享同一份 `config.json`，每人自备 `key.json` 增减节点与密钥。“套图生成”当前完全在浏览器内存中运行，不读取或写入配置。`prompt_prefix_model` 不显示为页面输入框，但会由前端注入当前批次货号后与图片一起发送给本地后台。Listing 产品由根目录 `config.json` 中的 `product_prompts` 管理；页面“管理产品”弹窗新增、修改或删除产品时只会原子更新根目录的这些产品字段。`n` 控制每次返回数量（1–4），`sizes` 将页面比例直接映射到 `/v1/images/edits` 的 `size`。
 
-`shared` 放“印花重绘”和“元素提取”共用的模型与服务配置；`patternRedraw` 对应“印花重绘”；`elementExtraction` 对应“元素提取”；`trans_model_pool` 保存生图节点列表和当前节点。“套图生成”当前完全在浏览器内存中运行，不读取或写入配置。`prompt_prefix_model` 不显示为页面输入框，但会由前端注入当前批次货号后与图片一起发送给本地后台。Listing 产品由根目录 `config.json` 中的 `product_prompts` 管理；页面“管理产品”弹窗新增、修改或删除产品时只会原子更新根目录的这些产品字段。`n` 控制每次返回数量（1–4），`sizes` 将页面比例直接映射到 `/v1/images/edits` 的 `size`。
-
-`key.json` 和 `runtime/` 均被 Git 忽略。Moonshot 与图片中转节点的完整 API Key 都只保存在 `key.json`；`config.json` 可以安全保留节点地址、模型和价格。接口和页面只返回脱敏 Key。
+`key.json` 和 `runtime/` 均被 Git 忽略。Moonshot 与图片中转节点的完整 API Key、节点地址均只保存在 `key.json`；`config.json` 可安全分享业务参数。接口和页面只返回脱敏 Key。兼容旧版仅含 `trans_model_keys` 的 `key.json`：启动时会按节点 ID 合并并迁移为完整 `trans_model_pool`。
 
 ## 安装 Chrome 扩展
 
@@ -307,8 +302,8 @@ Workflow 协调逻辑集中在 `app/workflow/workflow-manager.js`，模块之间
 
 | 路径 | 内容 | 是否提交 Git |
 |---|---|---|
-| `config.json` | 业务配置与图片中转节点池 | 是 |
-| `key.json` | Moonshot 的小写凭据与 `trans_model_keys` | 否 |
+| `config.json` | 业务配置（不含节点池） | 是 |
+| `key.json` | Moonshot 凭据 + `trans_model_pool` 动态节点（含 apikey） | 否 |
 | `runtime/tasks.json` | 任务状态、提示词、listing 和日志 | 否 |
 | `runtime/cache/input/` | 原图缓存 | 否 |
 | `runtime/cache/output/` | 已付费生成的图片 | 否 |
@@ -388,9 +383,9 @@ POD-html/
 │  │  └─ check/                          侵权查询合并图（随「清空」删除）
 │  └─ logs/server.log                    服务日志
 ├─ start.cmd                             Windows 一键启动
-├─ config.json                           完整业务配置与图片中转节点池
-├─ config.example.json                   完整业务配置与节点池模板
-├─ key.json                              Moonshot 与图片节点 API Key
+├─ config.json                           业务配置（不含节点池，可分享）
+├─ config.example.json                   业务配置模板
+├─ key.json                              Moonshot + 动态图片节点池（含密钥）
 ├─ key.example.json                      密钥结构模板
 ├─ update_plan.md                        整合设计与实施记录
 └─ README.md

@@ -1386,7 +1386,7 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       return API_ENDPOINT;
     }
 
-    // 将 config.json 节点价格表格式化为顶部可读文本，空值明确显示为未配置。
+    // 将 key.json 节点价格表格式化为顶部可读文本，空值明确显示为未配置。
     function formatTransModelNodePrice(price) {
       const source = price && typeof price === "object" ? price : {};
       const keys = Object.keys(source);
@@ -1402,7 +1402,7 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       return parts.length ? parts.join(" / ") : "价格未配置";
     }
 
-    // 根据 config.json 节点列表渲染手动选择气泡，并标记当前节点。
+    // 根据 key.json 动态节点列表渲染手动选择气泡，并标记当前节点。
     function renderTransModelNodeMenu() {
       if (!el.nodeMenu) return;
       el.nodeMenu.replaceChildren();
@@ -1468,7 +1468,7 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       }
     }
 
-    // 读取用户选择的 Moonshot 凭据与节点密钥映射，并交由后台保存和载入。
+    // 读取 key.json：Moonshot 凭据 + 完整节点池，后台按文件内容动态重建节点列表。
     async function importKeyFile(file) {
       const raw = await file.text();
       let parsed;
@@ -1481,8 +1481,12 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       });
       const text = await response.text();
       if (!response.ok) throw new Error(text.slice(0, 300));
-      applyConfigSummary(JSON.parse(text));
-      notice("Moonshot 与节点密钥已载入 key.json");
+      const summary = JSON.parse(text);
+      applyConfigSummary(summary);
+      const nodeCount = summary.transModelPool && Array.isArray(summary.transModelPool.nodes)
+        ? summary.transModelPool.nodes.length
+        : 0;
+      notice(`已载入 key.json：Moonshot 凭据 + ${nodeCount} 个图片节点`);
     }
 
     // 将图片生成节点切换为用户在气泡菜单中明确选择的节点。

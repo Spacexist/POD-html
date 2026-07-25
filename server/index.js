@@ -630,7 +630,7 @@ function clearTasks(res) {
 async function proxyImageEdit(req, res) {
   const config = getConfig().patternRedraw.imageApi;
   if (!config.apiKey) {
-    return sendJson(res, 500, { error: { message: "key.json 的 trans_model_keys 未配置当前节点 API Key", type: "proxy_config_error" } });
+    return sendJson(res, 500, { error: { message: "key.json 未配置当前节点的 apikey", type: "proxy_config_error" } });
   }
   let body;
   try { body = await readBody(req); }

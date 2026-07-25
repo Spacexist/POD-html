@@ -96,66 +96,72 @@ const DEFAULT_CONFIG = {
     product_prompts: {
       "地垫": DEFAULT_MAT_PRODUCT_PROMPT
     }
-  },
-  trans_model_pool: {
-    active: "node-1",
-    nodes: [
-      {
-        id: "node-1",
-        name: "节点1-beecode",
-        baseurl: "https://beeapi.ai",
-        endpoint: "/v1/images/edits",
-        model: "gpt-image-2",
-        price: {
-          "1k": 0.02,
-          "2k": 0.04,
-          "4K": 0.08
-        }
-      },
-      {
-        id: "node-2",
-        name: "节点2-tokenx24",
-        baseurl: "https://tokenx24.com",
-        endpoint: "/v1/images/edits",
-        model: "gpt-image-2",
-        price: {
-          "1k": "",
-          "2k": "",
-          "4K": ""
-        }
-      },
-      {
-        id: "node-3",
-        name: "节点3-code2alita",
-        baseurl: "https://code2alita.com",
-        endpoint: "/v1/images/edits",
-        model: "gpt-image-2",
-        price: {
-          "1k": "",
-          "2k": "",
-          "4K": ""
-        }
-      },
-      {
-        id: "node-4",
-        name: "节点4-vectorengine",
-        baseurl: "https://api.vectorengine.ai",
-        endpoint: "/v1/images/edits",
-        model: "gpt-image-2",
-        price: {
-          "1k": "",
-          "2k": "",
-          "4K": ""
-        }
-      }
-    ]
   }
 };
+
+// 默认图片中转节点模板：节点列表由 key.json 动态提供，不锁死在 config.json。
+const DEFAULT_TRANS_MODEL_NODES = [
+  {
+    id: "node-1",
+    name: "节点1-beecode",
+    baseurl: "https://beeapi.ai",
+    endpoint: "/v1/images/edits",
+    model: "gpt-image-2",
+    price: {
+      "1k": 0.02,
+      "2k": 0.04,
+      "4K": 0.08
+    },
+    apikey: ""
+  },
+  {
+    id: "node-2",
+    name: "节点2-tokenx24",
+    baseurl: "https://tokenx24.com",
+    endpoint: "/v1/images/edits",
+    model: "gpt-image-2",
+    price: {
+      "1k": "",
+      "2k": "",
+      "4K": ""
+    },
+    apikey: ""
+  },
+  {
+    id: "node-3",
+    name: "节点3-code2alita",
+    baseurl: "https://code2alita.com",
+    endpoint: "/v1/images/edits",
+    model: "gpt-image-2",
+    price: {
+      "1k": "",
+      "2k": "",
+      "4K": ""
+    },
+    apikey: ""
+  },
+  {
+    id: "node-4",
+    name: "节点4-vectorengine",
+    baseurl: "https://api.vectorengine.ai",
+    endpoint: "/v1/images/edits",
+    model: "gpt-image-2",
+    price: {
+      "1k": "",
+      "2k": "",
+      "4K": ""
+    },
+    apikey: ""
+  }
+];
 
 const DEFAULT_KEY_CONFIG = {
   baseurl: "https://api.moonshot.cn/v1",
   apikey: "",
-  trans_model_keys: {}
+  trans_model_pool: {
+    active: "node-1",
+    nodes: DEFAULT_TRANS_MODEL_NODES.map((node) => ({ ...node }))
+  }
 };
 
 // 原子写入 JSON，避免进程中断时留下半个配置文件。
@@ -308,18 +314,19 @@ function normalizeNodePrice(value) {
   return result;
 }
 
-// 规范化一个图片中转节点，统一使用小写 baseurl 并移除节点内的密钥。
-function normalizeTransModelNode(value, index) {
+// 规范化一个图片中转节点；includeSecrets 时保留 apikey（仅 key.json 使用）。
+function normalizeTransModelNode(value, index, includeSecrets = false) {
   const node = value && typeof value === "object" ? value : {};
   const fallbackId = `node-${index + 1}`;
   const id = String(node.id || node.name || fallbackId)
     .trim()
     .replace(/[^A-Za-z0-9._-]/g, "-")
     .slice(0, 80) || fallbackId;
+  const defaultBaseurl = DEFAULT_TRANS_MODEL_NODES[0].baseurl;
   const normalized = {
     id,
     name: String(node.name || `节点 ${index + 1}`).trim().slice(0, 80),
-    baseurl: String(node.baseurl || node.baseUrl || DEFAULT_CONFIG.trans_model_pool.nodes[0].baseurl)
+    baseurl: String(node.baseurl || node.baseUrl || defaultBaseurl)
       .trim()
       .replace(/\/+$/, ""),
     endpoint: node.endpoint ? normalizeEndpoint(node.endpoint) : "",
@@ -327,11 +334,16 @@ function normalizeTransModelNode(value, index) {
   };
   const price = normalizeNodePrice(node.price);
   if (Object.keys(price).length) normalized.price = price;
+  if (includeSecrets) {
+    normalized.apikey = String(node.apikey || node.apiKey || "").trim();
+  }
   return normalized;
 }
 
-// 规范化 config.json 中的图片中转节点池，并兼容数组或单节点对象。
-function normalizeTransModelPool(value) {
+// 规范化图片中转节点池；allowEmpty 时允许空列表（用于判断 key 是否显式提供节点）。
+function normalizeTransModelPool(value, options = {}) {
+  const includeSecrets = options.includeSecrets === true;
+  const allowEmpty = options.allowEmpty === true;
   const rawPool = value || {};
   let rawNodes = [];
   if (Array.isArray(rawPool)) {
@@ -341,11 +353,13 @@ function normalizeTransModelPool(value) {
   } else if (rawPool && typeof rawPool === "object" && (rawPool.baseUrl || rawPool.baseurl)) {
     rawNodes = [rawPool];
   }
-  if (!rawNodes.length) rawNodes = DEFAULT_CONFIG.trans_model_pool.nodes;
+  if (!rawNodes.length && !allowEmpty) {
+    rawNodes = DEFAULT_TRANS_MODEL_NODES.map((node) => ({ ...node }));
+  }
   const nodes = [];
   const usedIds = new Set();
   for (let index = 0; index < rawNodes.length && index < 50; index += 1) {
-    const node = normalizeTransModelNode(rawNodes[index], index);
+    const node = normalizeTransModelNode(rawNodes[index], index, includeSecrets);
     if (usedIds.has(node.id)) {
       let fallbackId = `node-${index + 1}`;
       let suffix = 2;
@@ -365,12 +379,13 @@ function normalizeTransModelPool(value) {
   for (let index = 0; index < nodes.length; index += 1) {
     if (nodes[index].id === active) activeExists = true;
   }
-  if (!activeExists) active = nodes[0].id;
+  if (!activeExists && nodes.length) active = nodes[0].id;
+  if (!nodes.length) active = "";
   return { active, nodes };
 }
 
-// 从新旧 key.json 结构读取各图片中转节点的独立 API Key。
-function normalizeTransModelKeys(input) {
+// 从旧版 trans_model_keys 映射读取节点密钥（兼容迁移）。
+function readLegacyTransModelKeyMap(input) {
   const result = {};
   const source = input && typeof input === "object" ? input : {};
   const configuredKeys = source.trans_model_keys || source.transModelKeys || {};
@@ -386,21 +401,87 @@ function normalizeTransModelKeys(input) {
     }
     if (id) result[id] = String(apiKey || "").trim();
   }
-  const legacyPool = source.trans_model_pool || {};
-  const legacyNodes = Array.isArray(legacyPool) ? legacyPool : legacyPool.nodes;
-  if (Array.isArray(legacyNodes)) {
-    for (let index = 0; index < legacyNodes.length && index < 100; index += 1) {
-      const node = legacyNodes[index] && typeof legacyNodes[index] === "object" ? legacyNodes[index] : {};
-      const id = String(node.id || `node-${index + 1}`).trim().slice(0, 80);
-      const apiKey = String(node.apikey || node.apiKey || "").trim();
-      if (id && !Object.prototype.hasOwnProperty.call(result, id)) result[id] = apiKey;
-    }
-  }
   return result;
 }
 
-// 规范化扁平 key.json，并兼容旧版 moonshot 与 trans_model_pool 嵌套结构。
-function normalizeKeyConfig(input = {}) {
+// 把旧 trans_model_keys 映射合并进节点列表（按 id 填 apikey）。
+function applyKeyMapToNodes(nodes, keyMap) {
+  if (!keyMap || typeof keyMap !== "object") return nodes;
+  for (let index = 0; index < nodes.length; index += 1) {
+    const id = nodes[index].id;
+    if (Object.prototype.hasOwnProperty.call(keyMap, id) && !nodes[index].apikey) {
+      nodes[index].apikey = String(keyMap[id] || "").trim();
+    }
+  }
+  return nodes;
+}
+
+// 判断输入是否显式包含图片中转节点定义或密钥。
+function hasTransModelPoolInput(input) {
+  if (!input || typeof input !== "object") return false;
+  if (input.trans_model_pool || input.transModelPool) return true;
+  if (input.trans_model_keys || input.transModelKeys) return true;
+  return false;
+}
+
+// 从 key.json 输入解析完整节点池（含 apikey）；可附带 config 侧旧节点元数据做迁移。
+function resolveTransModelPoolFromKeyInput(input = {}, fallbackPool = null) {
+  const source = input && typeof input === "object" ? input : {};
+  const keyMap = readLegacyTransModelKeyMap(source);
+  const explicitPool = source.trans_model_pool || source.transModelPool || null;
+  let pool;
+
+  if (explicitPool) {
+    pool = normalizeTransModelPool(explicitPool, { includeSecrets: true, allowEmpty: false });
+    applyKeyMapToNodes(pool.nodes, keyMap);
+    return pool;
+  }
+
+  // 旧版仅有 trans_model_keys：用 fallback（config 旧节点或默认模板）拼出完整节点。
+  if (Object.keys(keyMap).length) {
+    const base = fallbackPool && fallbackPool.nodes && fallbackPool.nodes.length
+      ? fallbackPool
+      : { active: "", nodes: DEFAULT_TRANS_MODEL_NODES.map((node) => ({ ...node })) };
+    pool = normalizeTransModelPool(base, { includeSecrets: true, allowEmpty: false });
+    applyKeyMapToNodes(pool.nodes, keyMap);
+    // 若 key 映射里有模板中没有的 id，补空节点，保证载入可动态增加。
+    const known = new Set(pool.nodes.map((node) => node.id));
+    const extraIds = Object.keys(keyMap);
+    for (let index = 0; index < extraIds.length && pool.nodes.length < 50; index += 1) {
+      const id = extraIds[index];
+      if (known.has(id)) continue;
+      pool.nodes.push(
+        normalizeTransModelNode(
+          {
+            id,
+            name: id,
+            baseurl: DEFAULT_TRANS_MODEL_NODES[0].baseurl,
+            endpoint: "/v1/images/edits",
+            model: "gpt-image-2",
+            apikey: keyMap[id]
+          },
+          pool.nodes.length,
+          true
+        )
+      );
+      known.add(id);
+    }
+    if (!pool.active && pool.nodes.length) pool.active = pool.nodes[0].id;
+    return pool;
+  }
+
+  if (fallbackPool && fallbackPool.nodes && fallbackPool.nodes.length) {
+    return normalizeTransModelPool(fallbackPool, { includeSecrets: true, allowEmpty: false });
+  }
+
+  return normalizeTransModelPool(DEFAULT_KEY_CONFIG.trans_model_pool, {
+    includeSecrets: true,
+    allowEmpty: false
+  });
+}
+
+// 规范化 key.json：Moonshot 凭据 + 完整图片中转节点池（含 apikey）。
+function normalizeKeyConfig(input = {}, fallbackPool = null) {
   const source = input.moonshot && typeof input.moonshot === "object" ? input.moonshot : input;
   return {
     baseurl: String(
@@ -409,16 +490,44 @@ function normalizeKeyConfig(input = {}) {
     apikey: String(
       source.apikey || source.apiKey || process.env.MOONSHOT_API_KEY || ""
     ).trim(),
-    trans_model_keys: normalizeTransModelKeys(input)
+    trans_model_pool: resolveTransModelPoolFromKeyInput(input, fallbackPool)
   };
 }
 
-// 返回 config.json 当前选中的图片中转节点。
-function activeTransModelNode(pool) {
+// 从内存 key 配置取节点密钥映射（供代理与 publicConfig 使用）。
+function transModelKeyMap(keyConfig = currentKeyConfig) {
+  const result = {};
+  const pool = keyConfig && keyConfig.trans_model_pool ? keyConfig.trans_model_pool : { nodes: [] };
   for (let index = 0; index < pool.nodes.length; index += 1) {
-    if (pool.nodes[index].id === pool.active) return pool.nodes[index];
+    const node = pool.nodes[index];
+    result[node.id] = String(node.apikey || "").trim();
   }
-  return pool.nodes[0];
+  return result;
+}
+
+// 写入 key.json 的序列化形态（节点内含 apikey，不再使用 trans_model_keys）。
+function serializeKeyConfig(keyConfig) {
+  const pool = normalizeTransModelPool(keyConfig.trans_model_pool, {
+    includeSecrets: true,
+    allowEmpty: false
+  });
+  return {
+    baseurl: String(keyConfig.baseurl || DEFAULT_KEY_CONFIG.baseurl).trim().replace(/\/+$/, ""),
+    apikey: String(keyConfig.apikey || "").trim(),
+    trans_model_pool: pool
+  };
+}
+
+// 返回 key.json 当前选中的图片中转节点。
+function activeTransModelNode(pool) {
+  const nodes = pool && Array.isArray(pool.nodes) ? pool.nodes : [];
+  if (!nodes.length) {
+    return normalizeTransModelNode(DEFAULT_TRANS_MODEL_NODES[0], 0, true);
+  }
+  for (let index = 0; index < nodes.length; index += 1) {
+    if (nodes[index].id === pool.active) return nodes[index];
+  }
+  return nodes[0];
 }
 
 // 读取本地 key.json 原始对象，供旧配置迁移和扁平密钥规范化使用。
@@ -434,7 +543,7 @@ function readKeyInput() {
   }
 }
 
-// 兼容旧版配置并补齐本版本所需的全部字段。
+// 业务配置 + key 节点池合并为运行时配置；节点列表始终来自 key.json。
 function normalizeConfig(input = {}, keyConfig = DEFAULT_KEY_CONFIG) {
   const shared = input.shared || {};
   const patternRedraw = input.patternRedraw || {};
@@ -443,12 +552,22 @@ function normalizeConfig(input = {}, keyConfig = DEFAULT_KEY_CONFIG) {
   const moonshot = shared.moonshot || input.moonshot || {};
   const infringement = patternRedraw.infringement || input.infringement || {};
   const server = shared.server || input.server || {};
-  const normalizedKeys = normalizeKeyConfig(keyConfig);
-  const transModelPool = normalizeTransModelPool(
-    input.trans_model_pool || input.transModelPool || DEFAULT_CONFIG.trans_model_pool
-  );
-  const imageNode = activeTransModelNode(transModelPool);
-  const imageApiKey = normalizedKeys.trans_model_keys[imageNode.id] || "";
+  const normalizedKeys = keyConfig && keyConfig.trans_model_pool
+    ? {
+        baseurl: String(keyConfig.baseurl || DEFAULT_KEY_CONFIG.baseurl).trim().replace(/\/+$/, ""),
+        apikey: String(keyConfig.apikey || "").trim(),
+        trans_model_pool: normalizeTransModelPool(keyConfig.trans_model_pool, {
+          includeSecrets: true,
+          allowEmpty: false
+        })
+      }
+    : normalizeKeyConfig(keyConfig);
+  // 运行时节点池不含密钥字段，密钥单独挂到 imageApi.apiKey。
+  const secretPool = normalizedKeys.trans_model_pool;
+  const publicPool = normalizeTransModelPool(secretPool, { includeSecrets: false, allowEmpty: false });
+  publicPool.active = secretPool.active;
+  const imageNode = activeTransModelNode(secretPool);
+  const imageApiKey = String((imageNode && imageNode.apikey) || "").trim();
 
   return {
     shared: {
@@ -508,14 +627,15 @@ function normalizeConfig(input = {}, keyConfig = DEFAULT_KEY_CONFIG) {
         DEFAULT_CONFIG.elementExtraction.prompt_prefix_model
       ).slice(0, 20000)
     },
-    trans_model_pool: transModelPool
+    // 仅内存使用；不写回 config.json。
+    trans_model_pool: publicPool
   };
 }
 
 const initialKeyInput = readKeyInput();
-let currentKeyConfig = normalizeKeyConfig(initialKeyInput);
+let currentKeyConfig = null;
 
-// 从业务配置副本中移除全部密钥字段，保留不含凭据的图片中转节点池。
+// 从业务配置副本中移除全部密钥与节点池（节点只属于 key.json）。
 function configWithoutSecrets(input) {
   const safe = JSON.parse(JSON.stringify(input && typeof input === "object" ? input : {}));
   if (safe.shared && safe.shared.moonshot) {
@@ -547,101 +667,84 @@ function configWithoutSecrets(input) {
   delete safe.baseUrl;
   delete safe.baseurl;
   delete safe.moonshot;
-  if (safe.trans_model_pool && Array.isArray(safe.trans_model_pool.nodes)) {
-    for (let index = 0; index < safe.trans_model_pool.nodes.length; index += 1) {
-      const node = safe.trans_model_pool.nodes[index];
-      if (node && typeof node === "object") {
-        delete node.apiKey;
-        delete node.apikey;
-      }
-    }
-  }
+  // 节点池改由 key.json 动态提供，config 不再保存。
+  delete safe.trans_model_pool;
+  delete safe.transModelPool;
   return safe;
 }
 
-// 判断 key.json 是否已经使用小写凭据和节点密钥映射的新结构。
+// 判断 key.json 是否需要迁移为「完整节点池」结构。
 function keyConfigNeedsMigration(input, normalized) {
-  const keys = Object.keys(input && typeof input === "object" ? input : {});
-  if (
-    keys.length !== 3 ||
-    !keys.includes("baseurl") ||
-    !keys.includes("apikey") ||
-    !keys.includes("trans_model_keys")
-  ) {
-    return true;
-  }
+  if (!input || typeof input !== "object") return true;
+  if (input.trans_model_keys || input.transModelKeys) return true;
+  if (!input.trans_model_pool && !input.transModelPool) return true;
   return JSON.stringify(input) !== JSON.stringify(normalized);
 }
 
-// 从旧 key.json 提取图片中转节点池，供首次迁移到 config.json 使用。
-function legacyTransModelPool(input) {
-  if (!input || typeof input !== "object" || !input.trans_model_pool) return null;
-  return normalizeTransModelPool(input.trans_model_pool);
-}
-
-// 把旧 config.json 节点内的 API Key 迁移到 key.json 节点映射。
-function mergeLegacyTransModelKeys(poolValue, keyConfig) {
+// 把旧 config.json 节点内的 API Key 合并进 key 节点池。
+function mergeLegacyNodeSecretsIntoKeyPool(poolValue, keyConfig) {
   const rawPool = poolValue || {};
   const rawNodes = Array.isArray(rawPool) ? rawPool : rawPool.nodes;
-  if (!Array.isArray(rawNodes)) return false;
-  const normalizedPool = normalizeTransModelPool(rawPool);
+  if (!Array.isArray(rawNodes) || !keyConfig || !keyConfig.trans_model_pool) return false;
   let changed = false;
-  for (let index = 0; index < rawNodes.length && index < normalizedPool.nodes.length; index += 1) {
+  const byId = {};
+  for (let index = 0; index < keyConfig.trans_model_pool.nodes.length; index += 1) {
+    byId[keyConfig.trans_model_pool.nodes[index].id] = keyConfig.trans_model_pool.nodes[index];
+  }
+  for (let index = 0; index < rawNodes.length; index += 1) {
     const rawNode = rawNodes[index] && typeof rawNodes[index] === "object" ? rawNodes[index] : {};
+    const id = String(rawNode.id || `node-${index + 1}`).trim().slice(0, 80);
     const apiKey = String(rawNode.apikey || rawNode.apiKey || "").trim();
-    const id = normalizedPool.nodes[index].id;
-    if (apiKey && !keyConfig.trans_model_keys[id]) {
-      keyConfig.trans_model_keys[id] = apiKey;
+    if (!id || !apiKey) continue;
+    if (byId[id]) {
+      if (!byId[id].apikey) {
+        byId[id].apikey = apiKey;
+        changed = true;
+      }
+    } else {
+      keyConfig.trans_model_pool.nodes.push(
+        normalizeTransModelNode({ ...rawNode, apikey: apiKey }, keyConfig.trans_model_pool.nodes.length, true)
+      );
       changed = true;
     }
   }
   return changed;
 }
 
-// 为 config.json 的每个节点补齐一个独立的 key.json 密钥槽位。
-function ensureTransModelKeySlots(keyConfig, pool) {
-  let changed = false;
-  for (let index = 0; index < pool.nodes.length; index += 1) {
-    const id = pool.nodes[index].id;
-    if (!Object.prototype.hasOwnProperty.call(keyConfig.trans_model_keys, id)) {
-      keyConfig.trans_model_keys[id] = "";
-      changed = true;
-    }
-  }
-  return changed;
-}
-
-// 判断导入的 key.json 是否显式包含图片中转节点密钥。
-function hasTransModelKeyInput(input) {
-  return Boolean(
-    input &&
-    typeof input === "object" &&
-    (input.trans_model_keys || input.transModelKeys || input.trans_model_pool)
-  );
-}
-
-// 从根目录 config.json 读取完整业务配置，并合并 key.json 中的 Moonshot 与节点凭据。
+// 从根目录 config.json 读取业务配置，节点池完全来自 key.json（可动态增减）。
 function loadInitialConfig() {
   fs.mkdirSync(RUNTIME_ROOT, { recursive: true });
   const rootConfig = readRootConfig();
   const businessConfig = Object.keys(rootConfig).length
     ? JSON.parse(JSON.stringify(rootConfig))
     : JSON.parse(JSON.stringify(DEFAULT_CONFIG));
-  const legacyPool = legacyTransModelPool(initialKeyInput);
-  const poolSource = rootConfig.trans_model_pool || legacyPool || DEFAULT_CONFIG.trans_model_pool;
-  mergeLegacyTransModelKeys(poolSource, currentKeyConfig);
-  businessConfig.trans_model_pool = normalizeTransModelPool(poolSource);
-  ensureTransModelKeySlots(currentKeyConfig, businessConfig.trans_model_pool);
-  if (
-    !rootConfig.trans_model_pool ||
-    JSON.stringify(rootConfig.trans_model_pool) !== JSON.stringify(businessConfig.trans_model_pool)
-  ) {
-    atomicWriteJson(ROOT_CONFIG_PATH, configWithoutSecrets(businessConfig));
+
+  // 迁移：config 里若仍有旧节点列表，仅作元数据回填，之后从 config 剥离。
+  const legacyConfigPool = rootConfig.trans_model_pool || rootConfig.transModelPool || null;
+  const fallbackMeta = legacyConfigPool
+    ? normalizeTransModelPool(legacyConfigPool, { includeSecrets: true, allowEmpty: true })
+    : null;
+
+  currentKeyConfig = normalizeKeyConfig(initialKeyInput, fallbackMeta);
+  if (legacyConfigPool) {
+    mergeLegacyNodeSecretsIntoKeyPool(legacyConfigPool, currentKeyConfig);
   }
-  if (keyConfigNeedsMigration(initialKeyInput, currentKeyConfig)) {
-    atomicWriteJson(KEY_PATH, currentKeyConfig);
+
+  // 若 config 仍含节点池，写回时剥离，避免继续锁死节点。
+  const safeBusiness = configWithoutSecrets(businessConfig);
+  if (rootConfig.trans_model_pool || rootConfig.transModelPool) {
+    atomicWriteJson(ROOT_CONFIG_PATH, safeBusiness);
+  } else if (!Object.keys(rootConfig).length) {
+    atomicWriteJson(ROOT_CONFIG_PATH, safeBusiness);
   }
-  return normalizeConfig(businessConfig, currentKeyConfig);
+
+  const serializedKey = serializeKeyConfig(currentKeyConfig);
+  if (keyConfigNeedsMigration(initialKeyInput, serializedKey)) {
+    atomicWriteJson(KEY_PATH, serializedKey);
+    currentKeyConfig = serializedKey;
+  }
+
+  return normalizeConfig(safeBusiness, currentKeyConfig);
 }
 
 let currentConfig = loadInitialConfig();
@@ -651,58 +754,56 @@ function getConfig() {
   return currentConfig;
 }
 
-// 保存不含密钥的业务配置，并重新合并当前 key.json。
+// 保存不含密钥的业务配置；忽略请求体中的节点池，节点只由 key.json 控制。
 function replaceConfig(input) {
-  const poolInput = input && (input.trans_model_pool || input.transModelPool);
-  if (poolInput) mergeLegacyTransModelKeys(poolInput, currentKeyConfig);
   const safeInput = configWithoutSecrets(input);
-  if (!safeInput.trans_model_pool) {
-    safeInput.trans_model_pool = currentConfig.trans_model_pool;
-  } else {
-    safeInput.trans_model_pool = normalizeTransModelPool(safeInput.trans_model_pool);
-  }
-  ensureTransModelKeySlots(currentKeyConfig, safeInput.trans_model_pool);
-  atomicWriteJson(KEY_PATH, currentKeyConfig);
   atomicWriteJson(ROOT_CONFIG_PATH, safeInput);
   currentConfig = normalizeConfig(safeInput, currentKeyConfig);
   return currentConfig;
 }
 
-// 保存并载入小写凭据与节点密钥映射，未提供节点密钥时保留现有映射。
+// 载入 key.json：完整替换节点池（可动态增减），未提供节点时保留现有池。
 function replaceKeyConfig(input) {
-  const nextKeys = normalizeKeyConfig(input);
-  if (!hasTransModelKeyInput(input)) {
-    nextKeys.trans_model_keys = currentKeyConfig.trans_model_keys;
+  const source = input && typeof input === "object" ? input : {};
+  let nextKeys;
+  if (hasTransModelPoolInput(source)) {
+    // 载入的 key 成为节点权威来源，按文件内容动态重建列表。
+    nextKeys = normalizeKeyConfig(source, null);
+  } else {
+    // 仅更新 Moonshot 凭据时保留当前节点池。
+    nextKeys = normalizeKeyConfig(source, currentKeyConfig.trans_model_pool);
+    nextKeys.trans_model_pool = currentKeyConfig.trans_model_pool;
   }
-  ensureTransModelKeySlots(nextKeys, currentConfig.trans_model_pool);
-  atomicWriteJson(KEY_PATH, nextKeys);
-  currentKeyConfig = nextKeys;
+  const serialized = serializeKeyConfig(nextKeys);
+  atomicWriteJson(KEY_PATH, serialized);
+  currentKeyConfig = serialized;
   currentConfig = normalizeConfig(readRootConfig(), currentKeyConfig);
   return currentConfig;
 }
 
-// 切换当前图片中转节点并把选择持久化到 config.json。
+// 切换当前图片中转节点，选择结果写入 key.json（个人偏好，不进 config）。
 function selectTransModelNode(nodeId) {
   const requestedId = String(nodeId || "").trim();
-  const rootConfig = readRootConfig();
-  const pool = normalizeTransModelPool(
-    rootConfig.trans_model_pool || currentConfig.trans_model_pool
-  );
+  const pool = normalizeTransModelPool(currentKeyConfig.trans_model_pool, {
+    includeSecrets: true,
+    allowEmpty: false
+  });
   let matched = false;
   for (let index = 0; index < pool.nodes.length; index += 1) {
     if (pool.nodes[index].id === requestedId) matched = true;
   }
   if (!matched) throw new Error(`找不到图片中转节点：${requestedId}`);
   pool.active = requestedId;
-  rootConfig.trans_model_pool = pool;
-  atomicWriteJson(ROOT_CONFIG_PATH, configWithoutSecrets(rootConfig));
-  currentConfig = normalizeConfig(rootConfig, currentKeyConfig);
+  currentKeyConfig.trans_model_pool = pool;
+  atomicWriteJson(KEY_PATH, serializeKeyConfig(currentKeyConfig));
+  currentConfig = normalizeConfig(readRootConfig(), currentKeyConfig);
   return currentConfig;
 }
 
 // 根据后台当前激活节点选择下一项，到列表末尾后循环回第一项。
 function selectNextTransModelNode() {
   const pool = currentConfig.trans_model_pool;
+  if (!pool.nodes.length) throw new Error("key.json 未配置任何图片中转节点");
   let currentIndex = -1;
   for (let index = 0; index < pool.nodes.length; index += 1) {
     if (pool.nodes[index].id === pool.active) currentIndex = index;
@@ -717,7 +818,7 @@ function maskKey(apiKey) {
   return `${apiKey.slice(0, 3)}...${apiKey.slice(-6)}`;
 }
 
-// 返回前端可用但不暴露完整密钥的配置。
+// 返回前端可用但不暴露完整密钥的配置；节点列表来自 key.json。
 function publicConfig(config = currentConfig) {
   const imageApi = config.patternRedraw.imageApi;
   const moonshot = config.shared.moonshot;
@@ -725,15 +826,18 @@ function publicConfig(config = currentConfig) {
   const elementExtraction = config.elementExtraction;
   const productSettings = getElementProductSettings();
   const productNames = Object.keys(productSettings.productPrompts);
+  const keyMap = transModelKeyMap(currentKeyConfig);
+  const secretPool = currentKeyConfig.trans_model_pool || { nodes: [] };
   const publicNodes = [];
-  for (let index = 0; index < config.trans_model_pool.nodes.length; index += 1) {
-    const node = config.trans_model_pool.nodes[index];
-    const nodeApiKey = currentKeyConfig.trans_model_keys[node.id] || "";
+  for (let index = 0; index < secretPool.nodes.length; index += 1) {
+    const node = secretPool.nodes[index];
+    const nodeApiKey = keyMap[node.id] || "";
     publicNodes.push({
       id: node.id,
       name: node.name,
       hasKey: Boolean(nodeApiKey),
       key: maskKey(nodeApiKey),
+      baseurl: node.baseurl,
       endpoint: node.endpoint || imageApi.endpoint,
       model: node.model || imageApi.model,
       price: node.price || {}
@@ -752,7 +856,7 @@ function publicConfig(config = currentConfig) {
     sizes: imageApi.sizes,
     similarityPrompt: imageApi.similarityPrompt,
     transModelPool: {
-      active: config.trans_model_pool.active,
+      active: secretPool.active || config.trans_model_pool.active,
       nodes: publicNodes
     },
     moonshot: {
