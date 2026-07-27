@@ -5,6 +5,7 @@ opencode-beecode-image-plugin.js
 beecode-cache/
 runtime/
 key.json
+log.txt
 # Portable Node downloaded by start.cmd (not committed)
 tools/node/
 node_modules/

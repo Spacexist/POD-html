@@ -223,6 +223,92 @@
       color: var(--red);
     }
 
+    .daily-stats-badge {
+      position: relative;
+      flex: 0 0 auto;
+      height: 34px;
+      padding: 0 13px;
+      border: 1px solid rgba(255, 122, 61, 0.7);
+      border-radius: 6px;
+      background: rgba(255, 122, 61, 0.12);
+      color: #ffffff;
+      font-size: 13px;
+      font-weight: 700;
+      line-height: 32px;
+      cursor: default;
+    }
+
+    .daily-stats-badge.hidden { display: none; }
+
+    .daily-stats-bubble {
+      position: absolute;
+      top: calc(100% + 9px);
+      left: 50%;
+      z-index: 120;
+      width: 270px;
+      padding: 12px 13px;
+      border: 1px solid #3a3a3a;
+      border-radius: 7px;
+      background: #202020;
+      color: var(--text);
+      line-height: 1.55;
+      box-shadow: 0 14px 34px rgba(0, 0, 0, 0.5);
+      opacity: 0;
+      pointer-events: none;
+      transform: translate(-50%, 4px);
+      transition: opacity 120ms ease, transform 120ms ease;
+    }
+
+    .daily-stats-bubble::before {
+      content: "";
+      position: absolute;
+      top: -5px;
+      left: calc(50% - 5px);
+      width: 9px;
+      height: 9px;
+      border-top: 1px solid #3a3a3a;
+      border-left: 1px solid #3a3a3a;
+      background: #202020;
+      transform: rotate(45deg);
+    }
+
+    .daily-stats-badge:hover .daily-stats-bubble,
+    .daily-stats-badge:focus-visible .daily-stats-bubble {
+      opacity: 1;
+      transform: translate(-50%, 0);
+    }
+
+    .daily-stats-date {
+      display: block;
+      margin-bottom: 7px;
+      color: var(--orange);
+      font-size: 12px;
+    }
+
+    .daily-stats-line {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      font-size: 13px;
+      font-weight: 400;
+    }
+
+    .daily-stats-line strong {
+      color: #ffffff;
+      font-weight: 700;
+    }
+
+    .daily-stats-requests {
+      display: block;
+      margin-top: 8px;
+      padding-top: 8px;
+      border-top: 1px solid #333333;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 400;
+      line-height: 1.5;
+    }
+
     .actions {
       display: flex;
       flex-wrap: wrap;
@@ -1294,6 +1380,16 @@
           <span class="node-multi-page-warning">请勿多开：多页面会互相覆盖节点</span>
         </div>
       </div>
+      <div id="dailyStatsBadge" class="daily-stats-badge" tabindex="0">
+        今日统计
+        <div class="daily-stats-bubble" role="tooltip">
+          <strong id="dailyStatsDate" class="daily-stats-date">今日</strong>
+          <span class="daily-stats-line"><span>成功生成图片</span><strong id="dailyGeneratedImages">0 张</strong></span>
+          <span class="daily-stats-line"><span>侵权审核图片</span><strong id="dailyInfringementImages">0 张</strong></span>
+          <span class="daily-stats-line"><span>元素提取图片</span><strong id="dailyExtractionImages">0 张</strong></span>
+          <span id="dailyStatsRequests" class="daily-stats-requests">请求：生成 0 · 侵权 0 · 提取 0</span>
+        </div>
+      </div>
       <div id="patternRedrawActions" class="actions">
         <button id="pickFiles" class="primary">上传图片</button>
         <button id="pickJson">导入JSON</button>
@@ -1532,6 +1628,7 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
     const KEY_ENDPOINT = "/api/keys";
     const AUTH_ENDPOINT = "/api/auth";
     const TRANS_MODEL_NODE_ENDPOINT = "/api/trans-model-node";
+    const DAILY_STATS_ENDPOINT = "/api/daily-stats";
     let appLoggedIn = false;
     let appBootstrapped = false;
     const TRANSLATE_ENDPOINT = "/translate-listing";
@@ -1653,6 +1750,31 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       }
     }
 
+    // 将后台当天统计渲染到“今日统计”悬停气泡。
+    function renderDailyStats(stats) {
+      const value = stats && typeof stats === "object" ? stats : {};
+      el.dailyStatsDate.textContent = value.date ? `${value.date} 今日统计` : "今日统计";
+      el.dailyGeneratedImages.textContent = `${Math.max(0, Number(value.generatedImages) || 0)} 张`;
+      el.dailyInfringementImages.textContent = `${Math.max(0, Number(value.infringementImages) || 0)} 张`;
+      el.dailyExtractionImages.textContent = `${Math.max(0, Number(value.extractionImages) || 0)} 张`;
+      el.dailyStatsRequests.textContent =
+        `请求：生成 ${Math.max(0, Number(value.generationRequests) || 0)} · ` +
+        `侵权 ${Math.max(0, Number(value.infringementRequests) || 0)} · ` +
+        `提取 ${Math.max(0, Number(value.extractionRequests) || 0)}`;
+    }
+
+    // 从后台读取当天累计数据，供页面首次进入时校准显示。
+    async function loadDailyStats() {
+      try {
+        const response = await fetch(DAILY_STATS_ENDPOINT, { cache: "no-store" });
+        const text = await response.text();
+        if (!response.ok) throw new Error(text.slice(0, 300));
+        renderDailyStats(JSON.parse(text));
+      } catch (error) {
+        notice(`今日统计读取失败：${error.message}`);
+      }
+    }
+
     // 更新登录页状态文案与样式。
     function setLoginStatus(message, kind) {
       if (!el.loginStatus) return;
@@ -1688,6 +1810,7 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       setLoginGateVisible(false);
       setKeyModifyDialogVisible(false);
       if (!opts.skipConfig) await loadConfig();
+      await loadDailyStats();
       if (!appBootstrapped) {
         appBootstrapped = true;
         loadCachedTasks()
@@ -2588,8 +2711,14 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
         try { upsertServerTask(JSON.parse(event.data)); }
         catch (error) { notice(`SSE 任务解析失败：${error.message}`); }
       };
+      // 接收后台业务计数变化并实时更新今日统计气泡。
+      function receiveDailyStats(event) {
+        try { renderDailyStats(JSON.parse(event.data)); }
+        catch (error) { notice(`今日统计解析失败：${error.message}`); }
+      }
       events.addEventListener("task.created", receiveTask);
       events.addEventListener("task.updated", receiveTask);
+      events.addEventListener("daily.stats.updated", receiveDailyStats);
       events.addEventListener("task.deleted", (event) => {
         try {
           const payload = JSON.parse(event.data);
@@ -3439,7 +3568,7 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       const response = await fetch(INFRINGEMENT_CHECK_ENDPOINT, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ image, page: state.page })
+        body: JSON.stringify({ image, page: state.page, imageCount: pageItems.length })
       });
       const raw = await response.text();
       let payload;

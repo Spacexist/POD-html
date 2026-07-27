@@ -21,6 +21,7 @@ const { createIntake } = require("./intake");
 
 const APP_PATH = path.join(ROOT, "app", "index.html");
 const LOG_PATH = path.join(RUNTIME_ROOT, "logs", "server.log");
+const DAILY_ACTIVITY_LOG_PATH = path.join(ROOT, "log.txt");
 const IMAGE_EDIT_TIMEOUT_MS = 5 * 60 * 1000;
 const INFRINGEMENT_TIMEOUT_MS = 20 * 60 * 1000;
 const MOONSHOT_THINKING_TIMEOUT_MS = 10 * 60 * 1000;
@@ -67,6 +68,89 @@ function appendServerLog(message) {
   fs.mkdirSync(path.dirname(LOG_PATH), { recursive: true });
   fs.appendFileSync(LOG_PATH, `${line}\n`, "utf8");
   console.log(line);
+}
+
+// 将单个日期数字补齐为两位。
+function padActivityTimePart(value) {
+  return String(value).padStart(2, "0");
+}
+
+// 将本机时间格式化为按天统计和日志展示使用的固定格式。
+function formatLocalActivityTime(date) {
+  const day = `${date.getFullYear()}-${padActivityTimePart(date.getMonth() + 1)}-${padActivityTimePart(date.getDate())}`;
+  const time = `${padActivityTimePart(date.getHours())}:${padActivityTimePart(date.getMinutes())}:${padActivityTimePart(date.getSeconds())}`;
+  return { day, time: `${day} ${time}` };
+}
+
+// 创建一份指定日期的空统计，保证前端字段始终完整。
+function createEmptyDailyActivityStats(day) {
+  return {
+    date: day,
+    generatedImages: 0,
+    generationRequests: 0,
+    infringementImages: 0,
+    infringementRequests: 0,
+    extractionImages: 0,
+    extractionRequests: 0
+  };
+}
+
+// 从根目录 log.txt 汇总指定日期的生成、侵权和元素提取数据。
+function readDailyActivityStats(targetDate) {
+  const date = targetDate instanceof Date ? targetDate : new Date();
+  const targetDay = formatLocalActivityTime(date).day;
+  const stats = createEmptyDailyActivityStats(targetDay);
+  if (!fs.existsSync(DAILY_ACTIVITY_LOG_PATH)) return stats;
+  let lines = [];
+  try {
+    lines = fs.readFileSync(DAILY_ACTIVITY_LOG_PATH, "utf8").split(/\r?\n/);
+  } catch (error) {
+    appendServerLog(`daily activity log read failed: ${error.message}`);
+    return stats;
+  }
+  for (const line of lines) {
+    const match = line.match(
+      /^\[(\d{4}-\d{2}-\d{2}) \d{2}:\d{2}:\d{2}\] (图片生成请求|图片生成成功|侵权查询|元素提取) \| 请求=(\d+) \| 图片=(\d+)$/
+    );
+    if (!match || match[1] !== targetDay) continue;
+    const requests = Math.max(0, Number(match[3]) || 0);
+    const images = Math.max(0, Number(match[4]) || 0);
+    if (match[2] === "图片生成请求") stats.generationRequests += requests;
+    else if (match[2] === "图片生成成功") stats.generatedImages += images;
+    else if (match[2] === "侵权查询") {
+      stats.infringementRequests += requests;
+      stats.infringementImages += images;
+    } else if (match[2] === "元素提取") {
+      stats.extractionRequests += requests;
+      stats.extractionImages += images;
+    }
+  }
+  return stats;
+}
+
+// 按时间顺序追加一条业务统计，并通过 SSE 实时刷新模块 1。
+function appendDailyActivity(activity, requestCount, imageCount) {
+  const now = new Date();
+  const timestamp = formatLocalActivityTime(now);
+  const requests = Math.max(0, Math.floor(Number(requestCount) || 0));
+  const images = Math.max(0, Math.floor(Number(imageCount) || 0));
+  try {
+    fs.appendFileSync(
+      DAILY_ACTIVITY_LOG_PATH,
+      `[${timestamp.time}] ${activity} | 请求=${requests} | 图片=${images}\n`,
+      "utf8"
+    );
+  } catch (error) {
+    appendServerLog(`daily activity log append failed: ${error.message}`);
+  }
+  const stats = readDailyActivityStats(now);
+  sse.publish("daily.stats.updated", stats);
+  return stats;
+}
+
+// 返回当天实时统计，供页面初次加载和断线重连后校准。
+function sendDailyActivityStats(res) {
+  return sendJson(res, 200, readDailyActivityStats(new Date()));
 }
 
 // 递归遮罩日志中的密钥、Cookie 和大型图片 Data URL，同时保留请求结构。
@@ -553,6 +637,7 @@ async function cacheOutput(req, res) {
         try { store.removeFile(previousOutputFile); }
         catch (error) { appendServerLog(`old output cleanup failed: ${error.message}`); }
       }
+      appendDailyActivity("图片生成成功", 0, writtenOutputFiles.length);
     }
     return sendJson(res, 200, store.publicTask(savedTask));
   } catch (error) {
@@ -636,6 +721,7 @@ async function proxyImageEdit(req, res) {
   let body;
   try { body = await readBody(req); }
   catch (error) { return sendJson(res, 413, { error: { message: error.message, type: "proxy_body_error" } }); }
+  appendDailyActivity("图片生成请求", 1, 0);
   const target = `${config.baseUrl}${config.endpoint}`;
   const clientController = new AbortController();
   const abortClientRequest = clientController.abort.bind(clientController);
@@ -806,6 +892,8 @@ async function checkInfringement(req, res) {
       savedContactSheet
     });
   }
+  const infringementImageCount = Math.max(0, Math.min(50, Math.floor(Number(payload.imageCount) || 0)));
+  appendDailyActivity("侵权查询", 1, infringementImageCount);
   const target = `${config.baseUrl}/chat/completions`;
   // 侵权审核需要稳定 JSON，不走深度推理；否则 reasoning 会吃光 max_tokens，content 只剩空白。
   const requestBody = {
@@ -952,6 +1040,8 @@ async function extractElements(req, res) {
       requestId
     });
   }
+  const extractionImageCount = Math.max(0, Math.min(9, Math.floor(Number(payload.itemCount) || 0)));
+  appendDailyActivity("元素提取", 1, extractionImageCount);
   const thinkingEnabled = String(req.headers["x-moonshot-thinking"] || "").toLowerCase() === "enabled";
   const requestTimeoutMs = thinkingEnabled ? MOONSHOT_THINKING_TIMEOUT_MS : MOONSHOT_FAST_TIMEOUT_MS;
   const target = `${moonshot.baseUrl}/chat/completions`;
@@ -1259,10 +1349,38 @@ function serveHtml(res) {
 // 发送独立的套图生成页面，避免其画布样式和事件影响主页面。
 function serveMockupHtml(res) {
   try {
-    const data = fs.readFileSync(path.join(ROOT, "app", "mockup.html"));
+    const data = fs.readFileSync(path.join(ROOT, "app", "mockup-assets", "index.html"));
     return send(res, 200, data, { "Content-Type": "text/html; charset=utf-8" });
   } catch (error) {
     return sendJson(res, 404, { error: { message: "找不到套图生成页面", type: "not_found" } });
+  }
+}
+
+// 发送编译后的模块3静态资源，并禁止路径跳出模块资源目录。
+function serveMockupAsset(res, url) {
+  const prefix = "/app/mockup-assets/";
+  let relativePath = "";
+  try {
+    relativePath = decodeURIComponent(url.pathname.slice(prefix.length));
+  } catch (error) {
+    return sendJson(res, 400, { error: { message: "模块3资源路径无效", type: "bad_request" } });
+  }
+  const assetRoot = path.resolve(ROOT, "app", "mockup-assets");
+  const assetPath = path.resolve(assetRoot, relativePath);
+  if (!relativePath || !assetPath.startsWith(`${assetRoot}${path.sep}`)) {
+    return sendJson(res, 404, { error: { message: "找不到模块3资源", type: "not_found" } });
+  }
+  let contentType = "application/octet-stream";
+  const extension = path.extname(assetPath).toLowerCase();
+  if (extension === ".js") contentType = "text/javascript; charset=utf-8";
+  else if (extension === ".css") contentType = "text/css; charset=utf-8";
+  else if (extension === ".svg") contentType = "image/svg+xml";
+  else if (extension === ".png") contentType = "image/png";
+  try {
+    const data = fs.readFileSync(assetPath);
+    return send(res, 200, data, { "Content-Type": contentType });
+  } catch (error) {
+    return sendJson(res, 404, { error: { message: "找不到模块3资源", type: "not_found" } });
   }
 }
 
@@ -1375,6 +1493,7 @@ const server = http.createServer(async (req, res) => {
   if (req.method === "OPTIONS") return send(res, 204, "");
   if (req.method === "GET" && (url.pathname === "/" || url.pathname === "/beecode-image-batch.html")) return serveHtml(res);
   if (req.method === "GET" && (url.pathname === "/mockup" || url.pathname === "/mockup/")) return serveMockupHtml(res);
+  if (req.method === "GET" && url.pathname.startsWith("/app/mockup-assets/")) return serveMockupAsset(res, url);
   if (req.method === "GET" && url.pathname === "/app/vendor/jszip.min.js") return serveJsZipScript(res);
   if (req.method === "GET" && url.pathname === "/app/element-extraction.js") return serveElementExtractionScript(res);
   if (req.method === "GET" && url.pathname === "/app/workflow/workflow-manager.js") return serveWorkflowManagerScript(res);
@@ -1384,6 +1503,7 @@ const server = http.createServer(async (req, res) => {
   if (req.method === "POST" && url.pathname === "/api/trans-model-node") return handleTransModelNode(req, res);
   if ((req.method === "GET" || req.method === "POST") && url.pathname === "/api/element-products") return handleElementProducts(req, res);
   if (req.method === "GET" && ["/health", "/api/health"].includes(url.pathname)) return sendJson(res, 200, publicConfig());
+  if (req.method === "GET" && url.pathname === "/api/daily-stats") return sendDailyActivityStats(res);
   if (req.method === "GET" && url.pathname === "/api/events") return sse.connect(req, res);
   if (req.method === "POST" && url.pathname === "/api/intake") return handleIntake(req, res, false);
   if (req.method === "POST" && url.pathname === "/api/intake/batch") return handleIntake(req, res, true);
