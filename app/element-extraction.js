@@ -87,6 +87,7 @@ class ElementExtractionModule {
       elementModule: document.getElementById("elementExtractionModule"),
       mockupModule: document.getElementById("mockupModule"),
       patternActions: document.getElementById("patternRedrawActions"),
+      dailyStats: document.getElementById("dailyStatsBadge"),
       chooseFolder: document.getElementById("elementChooseFolder"),
       folderInput: document.getElementById("elementFolderInput"),
       folderName: document.getElementById("elementFolderName"),
@@ -580,6 +581,7 @@ class ElementExtractionModule {
     this.elements.elementModule.classList.toggle("hidden", !showElement);
     this.elements.mockupModule.classList.toggle("hidden", !showMockup);
     this.elements.patternActions.classList.toggle("hidden", !showPattern);
+    this.elements.dailyStats.classList.toggle("hidden", !showPattern);
     document.body.classList.toggle("mockup-mode", showMockup);
     if (showMockup) {
       document.title = "套图生成 · POD 图像工作台";
@@ -1167,7 +1169,8 @@ class ElementExtractionModule {
     };
     const requestPayload = {
       image: collage,
-      prompt
+      prompt,
+      itemCount: itemIds.length
     };
     const requestBody = JSON.stringify(requestPayload);
     const requestLogPayload = {
