@@ -2360,7 +2360,7 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
     }
 
     function statusText(status) {
-      return { queued: "待生成", retry: "等待重试", running: "处理中", done: "已完成", error: "失败", stopped: "已停止" }[status] || status;
+      return { ready: "待生成", queued: "排队中", retry: "等待重试", running: "处理中", done: "已完成", error: "失败", stopped: "已停止" }[status] || status;
     }
 
     // 返回任务已经成功生成并缓存到界面的图片数量。
@@ -2478,7 +2478,7 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
           outputIndex: 0,
           sourceCode: "",
           displayCode: nextFallbackDisplayCode(),
-          status: "queued",
+          status: "ready",
           createdAt: nowText(),
           message: "等待生成",
           prompt: "",
@@ -2493,7 +2493,7 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       }
       el.files.value = "";
       render();
-      notice(`已添加 ${images.length} 张图片`);
+      notice(`已载入 ${images.length} 张图片，等待手动生成`);
     }
 
     function pickJsonRows(payload) {
@@ -2743,8 +2743,8 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       state.items = [];
       for (const task of tasks) {
         const item = applyCachedTask({ file: null, outputBlob: null, outputBlobs: [], outputUrls: [], outputIndex: 0 }, task);
-        if (item.status === "running") {
-          item.status = "queued";
+        if (item.status === "running" || item.status === "queued" || item.status === "retry") {
+          item.status = "ready";
           item.message = "等待生成";
         }
         state.items.push(item);

@@ -31,6 +31,7 @@ const SERVER_REQUEST_TIMEOUT_MS = INFRINGEMENT_TIMEOUT_MS + 60 * 1000;
 const MOONSHOT_403_RETRY_DELAYS_MS = [5000, 15000, 30000];
 const sse = createSseHub();
 const intake = createIntake({ store });
+let cacheWriteGeneration = 0;
 const INFRINGEMENT_RESPONSE_FORMAT = {
   type: "json_schema",
   json_schema: {
@@ -505,6 +506,7 @@ function parseMultipart(buffer, contentType) {
 }
 
 async function cacheInput(req, res) {
+  const writeGeneration = cacheWriteGeneration;
   let body;
   try { body = await readBody(req); }
   catch (error) { return sendJson(res, 413, { error: { message: error.message } }); }
@@ -519,11 +521,18 @@ async function cacheInput(req, res) {
     const previousInputFile = previousTask && previousTask.inputFile;
     const version = `${Date.now().toString(36)}-${process.hrtime.bigint().toString(36)}`;
     const inputFile = path.join(store.INPUT_DIR, `${id}-${version}${ext}`);
+    if (writeGeneration !== cacheWriteGeneration) {
+      return sendJson(res, 409, { error: { message: "缓存已清空，忽略旧输入写入", type: "cache_cleared" } });
+    }
     try {
       fs.writeFileSync(inputFile, file.data);
     } catch (error) {
       store.removeFile(inputFile);
       throw error;
+    }
+    if (writeGeneration !== cacheWriteGeneration) {
+      store.removeFile(inputFile);
+      return sendJson(res, 409, { error: { message: "缓存已清空，忽略旧输入写入", type: "cache_cleared" } });
     }
     let task;
     try {
@@ -585,6 +594,7 @@ function collectOutputFiles(files) {
 
 // 更新任务状态，并在存在输出文件时一次缓存全部生成图。
 async function cacheOutput(req, res) {
+  const writeGeneration = cacheWriteGeneration;
   let body;
   try { body = await readBody(req); }
   catch (error) { return sendJson(res, 413, { error: { message: error.message } }); }
@@ -609,6 +619,9 @@ async function cacheOutput(req, res) {
       logs: parseLogs(parsed.fields.logs)
     };
     const files = collectOutputFiles(parsed.files);
+    if (writeGeneration !== cacheWriteGeneration) {
+      return sendJson(res, 409, { error: { message: "缓存已清空，忽略旧输出写入", type: "cache_cleared" } });
+    }
     const previousTask = store.findById(id);
     // 无输出文件的状态回写不得复活已删除任务（清空后延迟日志曾导致幽灵任务）。
     if (!previousTask && !files.length) {
@@ -634,6 +647,10 @@ async function cacheOutput(req, res) {
       } catch (error) {
         for (const writtenFile of writtenOutputFiles) store.removeFile(writtenFile);
         throw error;
+      }
+      if (writeGeneration !== cacheWriteGeneration) {
+        for (const writtenFile of writtenOutputFiles) store.removeFile(writtenFile);
+        return sendJson(res, 409, { error: { message: "缓存已清空，忽略旧输出写入", type: "cache_cleared" } });
       }
       if (outputFiles.length) {
         update.outputFiles = outputFiles;
@@ -708,6 +725,9 @@ function clearLegacyInfringementContactSheets() {
 
 // 清空任务列表，并删除整个 runtime/cache（含 input/output/check）。
 function clearTasks(res) {
+  // 先让全部在途缓存写入和远程图片下载失效，防止清空后任务被异步结果复活。
+  cacheWriteGeneration += 1;
+  intake.clear();
   const taskCount = store.list().length;
   // 先按任务记录删一遍，再整目录扫清 cache（含侵权拼图 check）。
   for (const task of store.list()) {

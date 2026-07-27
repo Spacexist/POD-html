@@ -49,6 +49,12 @@ function isRetryable(error) {
 function createIntake({ store }) {
   const queue = [];
   let running = 0;
+  let queueGeneration = 0;
+
+  // 判断当前缓存任务是否仍属于清空前未失效的队列批次。
+  function isCurrentGeneration(generation) {
+    return generation === queueGeneration;
+  }
 
   async function fetchImage(imageurl) {
     const controller = new AbortController();
@@ -78,7 +84,8 @@ function createIntake({ store }) {
     }
   }
 
-  async function cacheQueuedTask(id) {
+  async function cacheQueuedTask(id, generation) {
+    if (!isCurrentGeneration(generation)) return;
     let task = store.findById(id);
     if (!task || task.inputFile) return;
     task = store.upsert({
@@ -90,6 +97,7 @@ function createIntake({ store }) {
     let result;
     let lastError;
     for (let attempt = 0; attempt < 2; attempt += 1) {
+      if (!isCurrentGeneration(generation)) return;
       try {
         if (attempt > 0) {
           task = store.upsert({
@@ -108,6 +116,7 @@ function createIntake({ store }) {
       }
     }
 
+    if (!isCurrentGeneration(generation)) return;
     if (!result) {
       store.upsert({
         id,
@@ -125,6 +134,10 @@ function createIntake({ store }) {
     // 只清理本任务旧输入文件，避免整目录 readdir 扫描。
     if (previousInputFile && previousInputFile !== inputFile) store.removeFile(previousInputFile);
     fs.writeFileSync(inputFile, result.buffer);
+    if (!isCurrentGeneration(generation)) {
+      store.removeFile(inputFile);
+      return;
+    }
     store.upsert({
       id,
       fileName: `${cleanFileName(task.sourceCode || task.listing || id)}${ext}`,
@@ -140,9 +153,11 @@ function createIntake({ store }) {
   function pump() {
     while (running < MAX_CONCURRENCY && queue.length) {
       const id = queue.shift();
+      const generation = queueGeneration;
       running += 1;
-      cacheQueuedTask(id)
+      cacheQueuedTask(id, generation)
         .catch((error) => {
+          if (!isCurrentGeneration(generation)) return;
           const task = store.findById(id);
           if (task) {
             store.upsert({
@@ -164,6 +179,12 @@ function createIntake({ store }) {
   function enqueue(id) {
     if (!queue.includes(id)) queue.push(id);
     pump();
+  }
+
+  // 清空尚未处理的远程图片缓存队列，并使所有在途下载结果失效。
+  function clear() {
+    queueGeneration += 1;
+    queue.length = 0;
   }
 
   function normalizeItem(input) {
@@ -236,7 +257,7 @@ function createIntake({ store }) {
     return true;
   }
 
-  return { accept, acceptBatch, retry };
+  return { accept, acceptBatch, retry, clear };
 }
 
 module.exports = { createIntake };
