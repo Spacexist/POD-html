@@ -70,6 +70,24 @@ function appendServerLog(message) {
   console.log(line);
 }
 
+// 提取 Node fetch 的底层网络原因，同时排除请求头和密钥等敏感内容。
+function fetchErrorDetails(error) {
+  const cause = error && error.cause ? error.cause : null;
+  return {
+    name: error && error.name ? error.name : "FetchError",
+    message: error && error.message ? error.message : String(error),
+    cause: cause ? {
+      name: cause.name || "",
+      code: cause.code || "",
+      message: cause.message || "",
+      errno: cause.errno || "",
+      syscall: cause.syscall || "",
+      address: cause.address || "",
+      port: cause.port || ""
+    } : null
+  };
+}
+
 // 将单个日期数字补齐为两位。
 function padActivityTimePart(value) {
   return String(value).padStart(2, "0");
@@ -744,13 +762,15 @@ async function proxyImageEdit(req, res) {
       "X-Image-Api-Target": target
     });
   } catch (error) {
-    appendServerLog(`image API proxy failed: ${error.message}`);
+    const details = fetchErrorDetails(error);
+    appendServerLog(`image API proxy failed: ${JSON.stringify(details)}`);
     if (res.destroyed) return;
     const timedOut = timeoutSignal.aborted;
     return sendJson(res, timedOut ? 504 : 502, {
       error: {
         message: timedOut ? "图片生成请求超过 5 分钟" : (error.message || String(error)),
-        type: timedOut ? "ImageRequestTimeout" : (error.name || "ProxyFetchError")
+        type: timedOut ? "ImageRequestTimeout" : (error.name || "ProxyFetchError"),
+        cause: details.cause
       },
       proxy: { target }
     });
