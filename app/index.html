@@ -800,6 +800,28 @@
       max-width: 100%;
     }
 
+    #patternRedrawModule .task-row > .td:nth-child(6),
+    #patternRedrawModule .task-row > .td:nth-child(7),
+    #patternRedrawModule .stack,
+    #patternRedrawModule .ops {
+      min-width: 0;
+      overflow: hidden;
+    }
+
+    #patternRedrawModule [data-task-message],
+    #patternRedrawModule .error-detail pre,
+    #patternRedrawModule .task-log pre {
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
+
+    #patternRedrawModule .ops .text-action {
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
     #patternRedrawModule,
     #patternRedrawModule textarea,
     #patternRedrawModule pre,
@@ -1660,7 +1682,6 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
     let taskRunSerial = 0;
     let scheduledRenderTimer = null;
     const pendingLogRenderIds = new Set();
-    let previewImageObserver = null;
     const el = Object.fromEntries(Array.from(document.querySelectorAll("[id]")).map((node) => [node.id, node]));
 
     // 返回浏览器实际请求的本地图片编辑代理地址。
@@ -2133,6 +2154,7 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       item.createdAt = cached.createdAt || item.createdAt || nowText();
       item.status = cached.status || item.status;
       item.message = cached.message || item.message;
+      if (item.status === "queued" && item.message === "已停止，可重新生成") item.status = "stopped";
       item.errorLog = cached.errorLog || "";
       item.logs = Array.isArray(cached.logs) ? cached.logs : (item.logs || []);
       item.prompt = typeof cached.prompt === "string" ? cached.prompt : (typeof item.prompt === "string" ? item.prompt : "");
@@ -2198,6 +2220,12 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       if (!item) {
         item = { file: null, outputBlob: null, outputBlobs: [], outputUrls: [], outputIndex: 0 };
         state.items.push(item);
+      }
+      // 本页主动写缓存时忽略对应 SSE 回声，避免同一响应再次触发整页渲染。
+      if (existed && Number(item.ignoreServerTaskUntil || 0) > Date.now()) {
+        item.cached = true;
+        if (renderNow && isCurrentPageItem(item)) scheduleRender(item);
+        return item;
       }
       const previousSignature = taskRenderSignature(item);
       applyCachedTask(item, cached);
@@ -2332,7 +2360,7 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
     }
 
     function statusText(status) {
-      return { queued: "待生成", retry: "等待重试", running: "处理中", done: "已完成", error: "失败" }[status] || status;
+      return { queued: "待生成", retry: "等待重试", running: "处理中", done: "已完成", error: "失败", stopped: "已停止" }[status] || status;
     }
 
     // 返回任务已经成功生成并缓存到界面的图片数量。
@@ -2362,7 +2390,11 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       let nextAt = Infinity;
       state.retryQueue = state.retryQueue.filter((id) => {
         const item = state.items.find((entry) => entry.id === id);
-        if (!item || item.status !== "retry") return false;
+        if (!item || (item.status !== "retry" && item.status !== "queued")) return false;
+        if (item.status === "queued") {
+          nextAt = now;
+          return true;
+        }
         nextAt = Math.min(nextAt, Number(item.retryAt || now));
         return true;
       });
@@ -2675,11 +2707,26 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
           form.set(`output${index}`, blobs[index], outputFileName(item, index, blobs.length));
         }
       }
-      const response = await fetch(`${CACHE_ORIGIN}/cache/output`, { method: "POST", body: form });
+      item.ignoreServerTaskUntil = Number.MAX_SAFE_INTEGER;
+      let response;
+      try {
+        response = await fetch(`${CACHE_ORIGIN}/cache/output`, { method: "POST", body: form });
+      } catch (error) {
+        item.ignoreServerTaskUntil = 0;
+        throw error;
+      }
       const text = await response.text();
-      if (!response.ok) throw new Error(text.slice(0, 300));
+      if (!response.ok) {
+        item.ignoreServerTaskUntil = 0;
+        throw new Error(text.slice(0, 300));
+      }
+      item.ignoreServerTaskUntil = Date.now() + 3000;
       const cached = JSON.parse(text);
-      if (!(item.status === "running" && !hasOutputs)) {
+      const keepLocalOutputs = outputBlobsForItem(item).length > 0;
+      if (hasOutputs || keepLocalOutputs) {
+        // 当前页继续使用已解码的 Blob，刷新页面时再读取服务端缓存地址。
+        item.cached = true;
+      } else if (!(item.status === "running" && !hasOutputs)) {
         const oldUrls = outputUrlsForItem(item).slice();
         applyCachedTask(item, cached);
         for (const oldUrl of oldUrls) revokeIfBlob(oldUrl);
@@ -2765,38 +2812,6 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       return new File([blob], name, { type: blob.type || item.inputType || "image/png" });
     }
 
-    // 将已进入预加载范围的图片地址写入 src，触发实际下载和解码。
-    function activatePreviewImage(image) {
-      if (!image || image.getAttribute("src")) return;
-      const source = image.dataset.previewSrc || "";
-      if (source) image.setAttribute("src", source);
-    }
-
-    // 创建页面唯一的预览观察器，只加载视口附近的任务图片。
-    function getPreviewImageObserver() {
-      if (previewImageObserver || !window.IntersectionObserver) return previewImageObserver;
-      // 观察回调只激活进入范围的图片，并立即解除对应观察。
-      previewImageObserver = new IntersectionObserver(function handlePreviewImageIntersections(entries) {
-        for (let index = 0; index < entries.length; index += 1) {
-          const entry = entries[index];
-          if (!entry.isIntersecting) continue;
-          activatePreviewImage(entry.target);
-          previewImageObserver.unobserve(entry.target);
-        }
-      }, { rootMargin: "700px 0px" });
-      return previewImageObserver;
-    }
-
-    // 将本次渲染产生的预览图接入按需加载；旧浏览器则直接加载。
-    function observePreviewImages() {
-      const images = el.rows.querySelectorAll("img[data-preview-src]");
-      const observer = getPreviewImageObserver();
-      for (let index = 0; index < images.length; index += 1) {
-        if (observer) observer.observe(images[index]);
-        else activatePreviewImage(images[index]);
-      }
-    }
-
     // 渲染当前页任务，并展示每个任务的多图轮播状态。
     function render() {
       cancelScheduledRender();
@@ -2810,7 +2825,6 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       el.prevPage.disabled = state.page <= 1;
       el.nextPage.disabled = state.page >= pages;
       el.lastPage.disabled = state.page >= pages;
-      if (previewImageObserver) previewImageObserver.disconnect();
       el.rows.innerHTML = "";
 
       for (const item of state.items.slice(start, end)) {
@@ -2820,7 +2834,7 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
         const statusClass = item.status === "running" ? "running" : item.status === "done" ? "done" : item.status === "error" ? "error" : item.status === "retry" ? "running" : "";
         const hasInputReady = Boolean(item.file || item.inputUrl);
         const canGenerate = item.status !== "running" && hasInputReady;
-        const runText = item.status === "done" ? "重新生成" : item.status === "error" ? "重发" : item.status === "retry" ? "立即重试" : "生成";
+        const runText = item.status === "done" || item.status === "stopped" ? "重新生成" : item.status === "error" ? "重发" : item.status === "retry" || item.status === "queued" ? "排队中" : "生成";
         const itemPrompt = item.prompt || "";
         const codeText = escapeHtml(itemDisplayCode(item));
         const codeTitle = escapeHtml(item.sourceCode || itemDisplayCode(item) || "");
@@ -2842,16 +2856,15 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
           : "";
         row.innerHTML = `
           <div class="td"><span class="code-badge" title="${codeTitle}">${codeText || "--"}</span></div>
-          <div class="td"><div class="preview-stack"><div class="preview-box">${item.inputUrl ? `<img data-preview-src="${item.inputUrl}" alt="input" decoding="async">` : `<span class="empty-preview">等待缓存原图</span>`}</div><div class="preview-name" title="${inputName}">${inputName}</div></div></div>
-          <div class="td"><div class="preview-stack"><div class="output-preview-frame">${previousOutputControl}<div class="preview-box ${outputUrl ? "downloadable" : ""}" ${outputUrl ? `data-download="${item.id}" title="点击下载当前生成图"` : ""}>${outputUrl ? `<img data-preview-src="${outputUrl}" alt="output ${outputIndex + 1}" decoding="async">` : `<span class="empty-preview">生成后显示</span>`}${outputIndexLabel}</div>${nextOutputControl}</div><div class="preview-name" title="${outputName}">${outputName}</div></div></div>
-          <div class="td"><div class="stack"><div>总数：${totalCount}</div><div class="${item.status === "done" ? "success" : item.status === "error" ? "failed" : ""}">${item.status === "error" ? `失败：${totalCount}` : `成功：${successCount(item)}`}</div></div></div>
+          <div class="td"><div class="preview-stack"><div class="preview-box">${item.inputUrl ? `<img src="${item.inputUrl}" alt="input" decoding="async">` : `<span class="empty-preview">等待缓存原图</span>`}</div><div class="preview-name" title="${inputName}">${inputName}</div></div></div>
+          <div class="td"><div class="preview-stack"><div class="output-preview-frame">${previousOutputControl}<div class="preview-box ${outputUrl ? "downloadable" : ""}" ${outputUrl ? `data-download="${item.id}" title="点击下载当前生成图"` : ""}>${outputUrl ? `<img src="${outputUrl}" alt="output ${outputIndex + 1}" decoding="async">` : `<span class="empty-preview">生成后显示</span>`}${outputIndexLabel}</div>${nextOutputControl}</div><div class="preview-name" title="${outputName}">${outputName}</div></div></div>
+          <div class="td"><div class="stack"><div data-task-total>总数：${totalCount}</div><div data-task-success class="${item.status === "done" ? "success" : item.status === "error" ? "failed" : ""}">${item.status === "error" ? `失败：${totalCount}` : `成功：${successCount(item)}`}</div></div></div>
           <div class="td prompt-cell"><textarea class="task-prompt" data-prompt="${item.id}">${escapeHtml(itemPrompt)}</textarea></div>
-          <div class="td"><div class="stack"><div>创建时间：${escapeHtml(item.createdAt)}</div><div>状态： <span class="status-pill ${statusClass}">${statusText(item.status)}</span></div><div class="muted">${escapeHtml(item.message)}</div>${item.errorLog ? `<details class="error-detail" open><summary>失败日志</summary><pre>${escapeHtml(item.errorLog)}</pre></details>` : ""}<div class="task-log"><div class="task-log-title">任务日志</div><pre data-task-log="${item.id}">${escapeHtml(logText(item))}</pre></div></div></div>
-          <div class="td"><div class="ops">${item.sourceUrl ? `<button class="text-action" data-refetch="${item.id}">重新获取</button>` : ""}${canGenerate ? `<button class="text-action" data-run="${item.id}">${runText}</button>` : ""}${outputUrl ? `<button class="text-action" data-download="${item.id}">下载</button>` : ""}${item.errorLog ? `<button class="text-action" data-copy-error="${item.id}">复制日志</button>` : ""}<button class="text-action" data-delete="${item.id}">删除</button></div></div>
+          <div class="td"><div class="stack"><div>创建时间：${escapeHtml(item.createdAt)}</div><div>状态： <span data-task-status class="status-pill ${statusClass}">${statusText(item.status)}</span></div><div data-task-message class="muted">${escapeHtml(item.message)}</div>${item.errorLog ? `<details class="error-detail" open><summary>失败日志</summary><pre>${escapeHtml(item.errorLog)}</pre></details>` : ""}<div class="task-log"><div class="task-log-title">任务日志</div><pre data-task-log="${item.id}">${escapeHtml(logText(item))}</pre></div></div></div>
+          <div class="td"><div class="ops">${item.sourceUrl ? `<button class="text-action" data-refetch="${item.id}">重新获取</button>` : ""}${canGenerate ? `<button class="text-action" data-run="${item.id}"${item.status === "queued" || item.status === "retry" ? " disabled" : ""}>${runText}</button>` : ""}${outputUrl ? `<button class="text-action" data-download="${item.id}">下载</button>` : ""}${item.errorLog ? `<button class="text-action" data-copy-error="${item.id}">复制日志</button>` : ""}<button class="text-action" data-delete="${item.id}">删除</button></div></div>
         `;
         el.rows.appendChild(row);
       }
-      observePreviewImages();
     }
 
     // 只更新单行输出预览，避免左右切换时整页重建导致闪烁。
@@ -2880,9 +2893,8 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
           image.decoding = "async";
           previewBox.insertBefore(image, previewBox.firstChild);
         }
-        // 直接改 src，保留 img 节点，避免整行重建和重新懒加载。
+        // 直接改 src 并保留 img 节点，避免整行重建导致预览闪烁。
         if (image.getAttribute("src") !== outputUrl) image.setAttribute("src", outputUrl);
-        image.dataset.previewSrc = outputUrl;
         image.alt = `output ${outputIndex + 1}`;
         previewBox.classList.add("downloadable");
         previewBox.dataset.download = item.id;
@@ -2917,6 +2929,113 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
         nameNode.textContent = outputName;
         nameNode.title = outputName;
       }
+
+      let previousButton = frame.querySelector("[data-output-prev]");
+      let nextButton = frame.querySelector("[data-output-next]");
+      if (outputCount > 1) {
+        if (!previousButton) {
+          previousButton = document.createElement("button");
+          previousButton.type = "button";
+          previousButton.className = "output-arrow prev";
+          previousButton.dataset.outputPrev = item.id;
+          previousButton.title = "上一张";
+          previousButton.setAttribute("aria-label", "上一张");
+          previousButton.innerHTML = "&lsaquo;";
+          frame.insertBefore(previousButton, previewBox);
+        }
+        if (!nextButton) {
+          nextButton = document.createElement("button");
+          nextButton.type = "button";
+          nextButton.className = "output-arrow next";
+          nextButton.dataset.outputNext = item.id;
+          nextButton.title = "下一张";
+          nextButton.setAttribute("aria-label", "下一张");
+          nextButton.innerHTML = "&rsaquo;";
+          frame.appendChild(nextButton);
+        }
+      } else {
+        if (previousButton) previousButton.remove();
+        if (nextButton) nextButton.remove();
+      }
+      return true;
+    }
+
+    // 只更新单个任务的运行状态、计数和操作按钮，避免生成时重建整页图片节点。
+    function updateTaskRuntimeState(item) {
+      if (!item || !item.id) return false;
+      const row = el.rows.querySelector(`.task-row[data-task-id="${item.id}"]`);
+      if (!row) return false;
+
+      let finished = 0;
+      for (let index = 0; index < state.items.length; index += 1) {
+        const status = state.items[index].status;
+        if (status === "done" || status === "error") finished += 1;
+      }
+      el.bar.style.width = state.items.length ? `${Math.round((finished / state.items.length) * 100)}%` : "0%";
+      el.progressText.textContent = `${finished} / ${state.items.length}`;
+
+      const statusClass = item.status === "running" ? "running"
+        : item.status === "done" ? "done"
+          : item.status === "error" ? "error"
+            : item.status === "retry" ? "running" : "";
+      const statusNode = row.querySelector("[data-task-status]");
+      if (statusNode) {
+        statusNode.className = `status-pill ${statusClass}`;
+        statusNode.textContent = statusText(item.status);
+      }
+      const messageNode = row.querySelector("[data-task-message]");
+      if (messageNode) messageNode.textContent = item.message || "";
+      const informationStack = messageNode ? messageNode.parentElement : null;
+      let errorDetails = row.querySelector(".error-detail");
+      if (item.errorLog) {
+        if (!errorDetails && informationStack) {
+          errorDetails = document.createElement("details");
+          errorDetails.className = "error-detail";
+          errorDetails.open = true;
+          const summary = document.createElement("summary");
+          summary.textContent = "失败日志";
+          const errorText = document.createElement("pre");
+          errorDetails.appendChild(summary);
+          errorDetails.appendChild(errorText);
+          const taskLogNode = informationStack.querySelector(".task-log");
+          informationStack.insertBefore(errorDetails, taskLogNode || null);
+        }
+        const errorText = errorDetails ? errorDetails.querySelector("pre") : null;
+        if (errorText) errorText.textContent = item.errorLog;
+      } else if (errorDetails) {
+        errorDetails.remove();
+      }
+
+      const outputCount = outputUrlsForItem(item).length;
+      const totalCount = item.status === "done" && outputCount
+        ? outputCount
+        : (item.requestedOutputCount || runtimeConfig.n);
+      const totalNode = row.querySelector("[data-task-total]");
+      if (totalNode) totalNode.textContent = `总数：${totalCount}`;
+      const successNode = row.querySelector("[data-task-success]");
+      if (successNode) {
+        successNode.className = item.status === "done" ? "success" : item.status === "error" ? "failed" : "";
+        successNode.textContent = item.status === "error" ? `失败：${totalCount}` : `成功：${successCount(item)}`;
+      }
+
+      const runButton = row.querySelector("[data-run]");
+      if (runButton) {
+        runButton.disabled = item.status === "running" || item.status === "queued" || item.status === "retry";
+        runButton.textContent = item.status === "done" || item.status === "stopped" ? "重新生成"
+          : item.status === "error" ? "重发"
+            : item.status === "retry" || item.status === "queued" ? "排队中" : "生成";
+      }
+      const operations = row.querySelector(".ops");
+      let downloadButton = row.querySelector(".ops [data-download]");
+      if (operations && outputCount && !downloadButton) {
+        downloadButton = document.createElement("button");
+        downloadButton.className = "text-action";
+        downloadButton.dataset.download = item.id;
+        downloadButton.textContent = "下载";
+        const deleteButton = row.querySelector("[data-delete]");
+        operations.insertBefore(downloadButton, deleteButton || null);
+      }
+      updateOutputPreview(item);
       return true;
     }
 
@@ -2934,7 +3053,7 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       const now = Date.now();
       for (let index = 0; index < state.retryQueue.length; index += 1) {
         const item = state.items.find((entry) => entry.id === state.retryQueue[index]);
-        if (!item || item.status !== "retry") {
+        if (!item || (item.status !== "retry" && item.status !== "queued")) {
           state.retryQueue.splice(index, 1);
           index -= 1;
           continue;
@@ -2981,12 +3100,30 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
         state.running += 1;
         runItem(item)
           .catch((error) => { failItem(item, error); })
-          .finally(() => {
+          // 队列任务结束后仅同步当前行，再继续调度下一项。
+          .finally(function finalizeQueuedTask() {
             state.running -= 1;
-            render();
+            if (!updateTaskRuntimeState(item)) render();
             pump();
           });
       }
+    }
+
+    // 将单行重发和重新生成放入统一队列，确保所有请求都受并发上限控制。
+    function queueManualRun(item) {
+      if (!item || item.status === "running") return;
+      if (item.status === "queued" && state.retryQueue.includes(item.id)) return;
+      state.stopped = false;
+      removeRetryQueue(item);
+      item.status = "queued";
+      item.message = "等待生成";
+      item.errorLog = "";
+      item.retryCount = 0;
+      item.retryAt = 0;
+      state.retryQueue.unshift(item.id);
+      taskLog(item, `手动任务已进入队列，当前并发上限 ${runtimeConfig.concurrency}`, { renderNow: false });
+      if (!updateTaskRuntimeState(item)) render();
+      pump();
     }
 
     function selectedRatio() {
@@ -3105,7 +3242,7 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
         item.prompt = currentPromptForItem(item);
         if (!item.prompt) throw new Error("提示词为空：请填写该行提示词，或点击填充空白提示词。");
         item.errorLog = "";
-        render();
+        if (!updateTaskRuntimeState(item)) render();
         if (wasDone) taskLog(item, "根据当前提示词重新生成");
         if (wasRetry) taskLog(item, "超时队列重试：重新请求");
         if (wasError) taskLog(item, "失败重发：重新请求");
@@ -3136,7 +3273,7 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
         taskLog(item, `组装 request：model=${runtimeConfig.model} size=${size} n=${imageCount} prompt=${prompt.length} chars image=multipart`);
 
         item.message = "请求图片中转";
-        render();
+        if (!updateTaskRuntimeState(item)) render();
         taskLog(item, `request 发送：POST ${remoteEndpoint()}`);
         taskLog(item, "等待图片中转返回...");
         const response = await fetch(API_ENDPOINT, {
@@ -3174,6 +3311,7 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
         item.errorLog = "";
         item.retryCount = 0;
         item.retryAt = 0;
+        if (!updateTaskRuntimeState(item)) render();
         taskLog(item, "渲染预览：完成");
         try {
           await cacheStatus(item, blobs);
@@ -3208,14 +3346,14 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
         item.message = "已停止，可重新生成";
         item.errorLog = "";
         item.retryAt = 0;
-        render();
+        if (!updateTaskRuntimeState(item)) render();
         cacheStatus(item).catch(function handleCancelledCacheError(cacheError) {
           notice(`缓存停止状态失败：${cacheError.message}`);
         });
         return;
       }
       if (isRetryableError(error) && enqueueRetry(item, error)) {
-        render();
+        if (!updateTaskRuntimeState(item)) render();
         pump();
         return;
       }
@@ -3763,6 +3901,7 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       const skipCache = options.skipCache === true;
       state.stopped = true;
       clearRetryTimer();
+      state.retryQueue = [];
       for (const activeRun of activeRunControllers.values()) {
         activeRun.controller.abort(createRunCancelledError());
       }
@@ -3770,7 +3909,7 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
         const item = state.items[index];
         if (item.status !== "queued" && item.status !== "running" && item.status !== "retry") continue;
         item.activeRunId = 0;
-        item.status = "queued";
+        item.status = "stopped";
         item.message = "已停止，可重新生成";
         item.errorLog = "";
         item.retryAt = 0;
@@ -3823,7 +3962,7 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       const item = state.items.find((entry) => entry.id === id);
       if (!item) return;
       if (target.dataset.refetch) refetchJsonInput(item);
-      if (target.dataset.run) runItem(item).catch((error) => { failItem(item, error); }).finally(render);
+      if (target.dataset.run) queueManualRun(item);
       if (target.dataset.outputPrev) moveOutput(item, -1);
       if (target.dataset.outputNext) moveOutput(item, 1);
       if (target.dataset.download) downloadItem(item).catch((error) => taskLog(item, `下载失败：${error.message}`));
