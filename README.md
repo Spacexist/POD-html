@@ -2,14 +2,14 @@
 
 # POD Image Workflow
 
-**Temu 商品采集、印花重绘、Moonshot 元素提取与套图生成的一体化本地工作台**
+**Temu 商品采集、印花重绘、Moonshot 元素提取、套图生成与商品导入的一体化本地工作台**
 
 [![Node.js 18+](https://img.shields.io/badge/Node.js-18%2B-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
 [![Chrome Extension](https://img.shields.io/badge/Chrome-Extension-4285F4?logo=googlechrome&logoColor=white)](#安装-chrome-扩展)
 [![No Dependencies](https://img.shields.io/badge/npm_dependencies-0-1f883d)](#快速开始)
 [![Local First](https://img.shields.io/badge/data-local_only-f97316)](#数据与安全)
 
-[快速开始](#快速开始) · [界面预览](#界面预览) · [三模块 Workflow](#三模块-workflow) · [安装扩展](#安装-chrome-扩展) · [导入数据](#json-导入) · [接口说明](#http-与-sse) · [故障排查](#故障排查)
+[快速开始](#快速开始) · [界面预览](#界面预览) · [四模块 Workflow](#四模块-workflow) · [安装扩展](#安装-chrome-扩展) · [导入数据](#json-导入) · [接口说明](#http-与-sse) · [故障排查](#故障排查)
 
 </div>
 
@@ -17,7 +17,7 @@
 
 ## 项目简介
 
-POD Image Workflow 把 **Temu 图片采集 Chrome 扩展**、**印花重绘**、**元素提取** 与 **套图生成** 放在同一个本地工作台中。扩展采集商品后，后台负责去重、缓存原图并通过 SSE 实时通知页面；元素提取模块可独立选择本机图片目录，通过 Moonshot 批量生成可编辑的元素清单；套图生成模块在独立画布中把印花批量合成到产品底图。
+POD Image Workflow 把 **Temu 图片采集 Chrome 扩展**、**印花重绘**、**元素提取**、**套图生成** 与 **商品导入** 放在同一个本地工作台中。扩展采集商品后，后台负责去重、缓存原图并通过 SSE 实时通知页面；元素提取模块可独立选择本机图片目录，通过 Moonshot 批量生成可编辑的元素清单；套图生成模块在独立画布中把印花批量合成到产品底图；商品导入模块把套图结果整理为 Listing、SKU 与妙手采集上传素材包。
 
 > 自动导入的任务只会进入 **待生成** 状态。只有手动点击“生成”或“批量生成”才会调用 BeeCode，不会因为采集或刷新页面产生费用。
 
@@ -29,11 +29,12 @@ POD Image Workflow 把 **Temu 图片采集 Chrome 扩展**、**印花重绘**、
 |---|---|
 | 商品采集 | 获取 `imageurl`、`listing` 和编号，按完整图片 URL 精确去重 |
 | 原图缓存 | JSON 导入最多 10 并发；502/503/504 或网络超时仅重试一次 |
-| 批量生图 | 默认 3 并发、生成数量手输 1–4，支持取消、重发和按当前提示词重新生成 |
+| 批量生图 | 顶部可手动设置 1–10 并发并持久化，生成数量手输 1–4，支持取消、重发和按当前提示词重新生成 |
 | 元素提取 | 每 9 张组成 3×3 标号图，默认 3 并发异步调用 Moonshot；支持停止、403 自动重试，结果可编辑并导出 |
 | 登录门禁 | 打开页先认根目录 `key.json`；没有则登录页导入；顶部「修改」可覆盖换密钥 |
 | 套图生成 | 配置多组产品图/蒙版模板与多个平面、圆柱曲面网格，支持 Homography 高清导出、置换、混合和按印花批量导出 |
-| Workflow | 模块 1 生成图批量传入模块 2，模块 2 重命名后的完成图批量传入模块 3 |
+| 商品导入 | 识别“父文件夹 / Listing / 主图”目录，配置公共信息和 SKU，预览 Listing → 图片 → SKU 分配并导出妙手上传 ZIP |
+| Workflow | 模块 1 生成图传入模块 2，模块 2 完成图传入模块 3，模块 3 批量导出后自动切换并载入模块 4 |
 | 状态恢复 | 输入图、生成图、提示词、日志和任务状态全部持久化 |
 | 文件下载 | 使用 `listing` 商品标题命名，只保存图片，不生成 TXT |
 | 联系表 | 当前页 50 张，10×5 排列，审核图保存到 `runtime/cache/check/` |
@@ -59,8 +60,8 @@ POD Image Workflow 把 **Temu 图片采集 Chrome 扩展**、**印花重绘**、
 </p>
 
 <p align="center">
-  <img src="docs/images/06-modules.png" alt="Three modules overview diagram" width="920"><br>
-  <sub>三模块职责一览</sub>
+  <img src="docs/images/06-modules.png" alt="Workflow modules overview diagram" width="920"><br>
+  <sub>Workflow 模块职责一览（模块 4 详见下文）</sub>
 </p>
 
 ## 工作流程
@@ -76,6 +77,8 @@ flowchart LR
     G -->|返回图片| H["runtime/cache/output"]
     H -->|批量传输，每个任务取第一张| I["模块 2：元素提取"]
     I -->|完成并按最终名称重命名| J["模块 3：套图生成印花组"]
+    J -->|批量导出完成并传递目录句柄| K["模块 4：商品导入"]
+    K -->|整理 Listing / SKU| L["妙手上传素材包 ZIP"]
 ```
 
 - 服务在线：采集后立即同步到 POD。
@@ -273,6 +276,7 @@ JSON 导入只缓存原图，不会自动进入付费生图队列。
 
 - 顶部“今日统计”悬停气泡实时显示成功缓存图片数、侵权审核图片数和元素提取图片数，并补充三类请求次数。
 - 根目录 `log.txt` 按本机时间顺序追加简明记录；每日汇总中的生成数量只计算已经成功写入输出缓存的图片。
+- 顶部“并发”输入框可在 1–10 之间调整并写回 `config.json`；新值立即用于后续队列，当前进行中的请求保持不变。长耗时图片请求由本地代理使用 5 分钟显式超时和 TCP 保活转发。
 
 - 每页固定 50 条，避免一次渲染大量图片导致卡顿。
 - 每个任务拥有独立提示词和运行日志。
@@ -342,7 +346,18 @@ JSON 导入只缓存原图，不会自动进入付费生图队列。
 - 新印花全部完成校验后才替换旧组；坏图单独计入失败，旧 Blob URL 会在替换或页面退出时释放。
 - 模板配置可连同产品图和蒙版图导出；批量结果按“印花文件名/模板合成图”组织。
 
-## 三模块 Workflow
+## 模块 4：商品导入
+
+- 使用独立页面 `/listing-import`，并通过顶部“商品导入”标签集成到主工作台。
+- 模块 3 批量导出完成后自动切换到模块 4，并直接传递已授权的导出目录句柄，无需重复选择路径。
+- 也可手动选择符合“父文件夹 / Listing 文件夹 / 主图1、主图2……”结构的目录。
+- 自动统计 Listing、图片和 SKU 数量；Listing 表格支持分页、标题编辑和点击切换当前商品。
+- 当前 Listing 以树状结构展开类目、全部主图、每个 SKU 的图片分配、详情图和产品描述。
+- SKU 图片可以由多个 SKU 共用同一个图片节点；缺图关系使用红色断线并标记“缺图”。
+- 公共商品信息与 SKU 属性组合集中在同一个卡片中，最多支持两个 SKU 属性的笛卡尔组合。
+- 导出按钮生成“妙手上传素材包 ZIP”，后续在妙手中使用“产品采集 → 导入采集 → 上传压缩包”。
+
+## 四模块 Workflow
 
 Workflow 协调逻辑集中在 `app/workflow/workflow-manager.js`，模块之间传递浏览器 `File` 对象，不需要先写入临时文件夹。
 
@@ -361,7 +376,14 @@ Workflow 协调逻辑集中在 `app/workflow/workflow-manager.js`，模块之间
 3. 系统只选择状态为“已完成”且最终名称非空的图片，按照图片文件夹导出规则生成合法且不重复的文件名。
 4. 页面自动切换到“套图生成”，新批次覆盖“印花组”，现有产品模板和效果设置保持不变。
 
-两段传输都采用“成功项继续、失败项跳过”的策略，并显示本批成功、跳过或失败数量。Workflow 数据仅存在于当前浏览器会话；刷新页面后不会自动恢复模块 2 的结果和待传批次，但模块 1 的持久化任务仍可重新传输。仅重启后台服务而不刷新页面时，当前页面内存不会立即丢失。
+### 模块 3 → 模块 4
+
+1. 在模块 3 选择导出文件夹并执行批量导出。
+2. 批量渲染全部完成后，模块 3 向主页面发送导出目录句柄和目录名称。
+3. 主页面自动切换到“商品导入”，模块 4 直接读取该目录中的 Listing 与图片。
+4. 补充类目、描述、SKU 编码、价格、库存、重量、尺寸和 SKU 图片后，导出妙手上传 ZIP。
+
+前三个模块的图片传输采用“成功项继续、失败项跳过”的策略，并显示本批成功、跳过或失败数量。Workflow 数据与目录句柄仅存在于当前浏览器会话；刷新页面后不会自动恢复模块 2 的结果、模块 3 的待传批次或模块 4 的目录授权，但模块 1 的持久化任务仍可重新传输。仅重启后台服务而不刷新页面时，当前页面内存不会立即丢失。
 
 ## 数据与安全
 
@@ -376,7 +398,7 @@ Workflow 协调逻辑集中在 `app/workflow/workflow-manager.js`，模块之间
 | `runtime/logs/server.log` | 服务日志 | 否 |
 | `log.txt` | 每日生成、侵权审核与元素提取统计 | 否 |
 
-跨模块 Workflow 的 `File` 对象只存在于浏览器内存，不写入 `runtime/`。模块 1 原有任务和输出缓存仍按上表持久化；模块 2 的提取结果、模块 3 的画布状态及传输批次刷新后清空。
+跨模块 Workflow 的 `File` 对象和目录句柄只存在于浏览器内存，不写入 `runtime/`。模块 1 原有任务和输出缓存仍按上表持久化；模块 2 的提取结果、模块 3 的画布状态、模块 4 的导入状态及传输批次刷新后清空。
 
 修改前端、刷新页面或重载扩展不会重新生成图片。
 
@@ -387,12 +409,14 @@ Workflow 协调逻辑集中在 `app/workflow/workflow-manager.js`，模块之间
 | 方法 | 路径 | 作用 |
 |---|---|---|
 | `GET` | `/mockup` | 独立套图生成页面 |
-| `GET` | `/app/workflow/workflow-manager.js` | 三模块会话内文件传输管理器 |
+| `GET` | `/listing-import` | 独立商品导入与妙手素材包页面 |
+| `GET` | `/app/workflow/workflow-manager.js` | 四模块会话内文件与目录传输管理器 |
 | `GET` | `/api/health` | 健康检查和脱敏配置 |
 | `GET` | `/api/auth` | 登录状态：根目录是否已有可解析的 `key.json` |
 | `GET / POST` | `/api/config` | 读取或替换业务配置 |
 | `POST` | `/api/keys` | 导入并写入本机 `key.json`（登录 / 修改密钥） |
 | `POST` | `/api/trans-model-node` | 切换图片中转节点 |
+| `POST` | `/api/image-concurrency` | 保存顶部手动设置的图片生成并发数（1–10） |
 | `GET / POST` | `/api/element-products` | 读取或管理根目录 Listing 产品配置 |
 | `GET` | `/api/tasks` | 恢复全部任务 |
 | `POST` | `/api/intake` | 扩展单条导入 |
@@ -423,12 +447,13 @@ SSE 事件包括：
 ```text
 POD-html/
 ├─ app/
-│  ├─ index.html                         三模块 POD 单页前端
+│  ├─ index.html                         四模块 POD 单页前端
 │  ├─ element-extraction.js              元素提取目录、批次、编辑与导出
 │  ├─ mockup-assets/                     新模块 3 自包含页面、JS、CSS 与图标
+│  ├─ listing-import.html                 模块 4 Listing / SKU 整理与妙手 ZIP 导出
 │  ├─ mockup.html                         旧版套图页面源码（运行时不再加载）
 │  ├─ workflow/
-│  │  └─ workflow-manager.js             三模块会话内 File 传输协调器
+│  │  └─ workflow-manager.js             四模块会话内 File / 目录传输协调器
 │  └─ vendor/jszip.min.js                 本地 ZIP 压缩依赖
 ├─ server/
 │  ├─ index.js                           HTTP 路由、BeeCode 代理、缓存接口

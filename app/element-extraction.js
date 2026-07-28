@@ -39,6 +39,8 @@ class ElementExtractionModule {
     this.handlePatternTabClick = this.handlePatternTabClick.bind(this);
     this.handleElementTabClick = this.handleElementTabClick.bind(this);
     this.handleMockupTabClick = this.handleMockupTabClick.bind(this);
+    this.handleListingImportTabClick = this.handleListingImportTabClick.bind(this);
+    this.handleMockupExportCompleteMessage = this.handleMockupExportCompleteMessage.bind(this);
     this.handleChooseFolderClick = this.handleChooseFolderClick.bind(this);
     this.handleFolderChange = this.handleFolderChange.bind(this);
     this.handleRunClick = this.handleRunClick.bind(this);
@@ -83,9 +85,13 @@ class ElementExtractionModule {
       patternTab: document.getElementById("patternRedrawTab"),
       elementTab: document.getElementById("elementExtractionTab"),
       mockupTab: document.getElementById("mockupTab"),
+      listingImportTab: document.getElementById("listingImportTab"),
       patternModule: document.getElementById("patternRedrawModule"),
       elementModule: document.getElementById("elementExtractionModule"),
       mockupModule: document.getElementById("mockupModule"),
+      mockupFrame: document.getElementById("mockupFrame"),
+      listingImportModule: document.getElementById("listingImportModule"),
+      listingImportFrame: document.getElementById("listingImportFrame"),
       patternActions: document.getElementById("patternRedrawActions"),
       dailyStats: document.getElementById("dailyStatsBadge"),
       chooseFolder: document.getElementById("elementChooseFolder"),
@@ -139,6 +145,8 @@ class ElementExtractionModule {
     this.elements.patternTab.addEventListener("click", this.handlePatternTabClick);
     this.elements.elementTab.addEventListener("click", this.handleElementTabClick);
     this.elements.mockupTab.addEventListener("click", this.handleMockupTabClick);
+    this.elements.listingImportTab.addEventListener("click", this.handleListingImportTabClick);
+    window.addEventListener("message", this.handleMockupExportCompleteMessage);
     this.elements.chooseFolder.addEventListener("click", this.handleChooseFolderClick);
     this.elements.folderInput.addEventListener("change", this.handleFolderChange);
     this.elements.run.addEventListener("click", this.handleRunClick);
@@ -569,22 +577,47 @@ class ElementExtractionModule {
     this.switchModule("mockup");
   }
 
+  /** 切换到独立商品导入页面，并保留其他模块的当前内存状态。 */
+  handleListingImportTabClick() {
+    this.switchModule("listingImport");
+  }
+
+  /** Opens module 4 and forwards the directory exported by module 3. */
+  handleMockupExportCompleteMessage(event) {
+    if (event.origin !== window.location.origin) return;
+    if (!this.elements.mockupFrame || event.source !== this.elements.mockupFrame.contentWindow) return;
+    const payload = event.data;
+    if (!payload || payload.type !== "pod-mockup-export-complete") return;
+    if (!payload.directoryHandle || payload.directoryHandle.kind !== "directory") return;
+    this.switchModule("listingImport");
+    this.elements.listingImportFrame.contentWindow.postMessage({
+      type: "pod-listing-import-directory",
+      directoryHandle: payload.directoryHandle,
+      directoryName: String(payload.directoryName || payload.directoryHandle.name || "")
+    }, window.location.origin);
+  }
+
   /** 切换模块视图，同时保留各模块当前内存状态。 */
   switchModule(moduleName) {
     const showElement = moduleName === "elementExtraction";
     const showMockup = moduleName === "mockup";
-    const showPattern = !showElement && !showMockup;
+    const showListingImport = moduleName === "listingImport";
+    const showPattern = !showElement && !showMockup && !showListingImport;
     this.elements.patternTab.classList.toggle("active", showPattern);
     this.elements.elementTab.classList.toggle("active", showElement);
     this.elements.mockupTab.classList.toggle("active", showMockup);
+    this.elements.listingImportTab.classList.toggle("active", showListingImport);
     this.elements.patternModule.classList.toggle("hidden", !showPattern);
     this.elements.elementModule.classList.toggle("hidden", !showElement);
     this.elements.mockupModule.classList.toggle("hidden", !showMockup);
+    this.elements.listingImportModule.classList.toggle("hidden", !showListingImport);
     this.elements.patternActions.classList.toggle("hidden", !showPattern);
     this.elements.dailyStats.classList.toggle("hidden", !showPattern);
-    document.body.classList.toggle("mockup-mode", showMockup);
+    document.body.classList.toggle("mockup-mode", showMockup || showListingImport);
     if (showMockup) {
       document.title = "套图生成 · POD 图像工作台";
+    } else if (showListingImport) {
+      document.title = "商品导入 · POD 图像工作台";
     } else if (showElement) {
       document.title = "元素提取 · POD 图像工作台";
     } else {

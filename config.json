@@ -13,7 +13,7 @@
       "endpoint": "/v1/images/edits",
       "model": "gpt-image-2",
       "size": "1024x1024",
-      "concurrency": 3,
+      "concurrency": 1,
       "n": 1,
       "sizes": {
         "1:1": "1024x1024",

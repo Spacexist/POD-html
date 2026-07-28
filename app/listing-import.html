@@ -1,0 +1,956 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>妙手商品导入助手</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <script src="/app/vendor/jszip.min.js"></script>
+    <style>
+      :root {
+        font-family: "Microsoft YaHei", "Segoe UI", sans-serif;
+        color: #f4f1ed;
+        background: #101010;
+        --surface: #171717;
+        --surface-raised: #1d1d1d;
+        --field: #121212;
+        --line: #33302e;
+        --line-strong: #4a4541;
+        --muted: #9f9a94;
+        --accent: #ff7a3d;
+        --accent-soft: rgba(255, 122, 61, .12);
+        --data: #93d9ff;
+      }
+      * { box-sizing: border-box; }
+      html { color-scheme: dark; }
+      body {
+        min-height: 100vh;
+        margin: 0;
+        font-size: 16px;
+        background:
+          linear-gradient(rgba(255,255,255,.018) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255,255,255,.018) 1px, transparent 1px),
+          #101010;
+        background-size: 28px 28px;
+      }
+      button, input, textarea, select { font: inherit; }
+      button {
+        min-height: 44px;
+        padding: 0 18px;
+        border: 1px solid var(--accent);
+        border-radius: 7px;
+        background: var(--accent);
+        color: #fff;
+        font-weight: 700;
+        cursor: pointer;
+        transition: border-color 120ms ease, background 120ms ease, transform 120ms ease;
+      }
+      button:hover:not(:disabled) { transform: translateY(-1px); background: #ff8a55; }
+      button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible {
+        outline: 2px solid #ffd2bd;
+        outline-offset: 2px;
+      }
+      button:disabled { cursor: not-allowed; opacity: .45; }
+      button.ghost {
+        border-color: var(--line-strong);
+        background: transparent;
+        color: #d8d4cf;
+      }
+      button.ghost:hover:not(:disabled) { border-color: #706861; background: #252321; }
+      .app { width: 100%; margin: 0 auto; padding: 30px 36px 88px; }
+      .module-hero {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 34px;
+        align-items: end;
+        margin-bottom: 24px;
+        padding: 6px 2px 24px;
+        border-bottom: 1px solid var(--line);
+      }
+      .eyebrow {
+        display: block;
+        margin-bottom: 7px;
+        color: var(--accent);
+        font-family: "Cascadia Mono", Consolas, monospace;
+        font-size: 13px;
+        font-weight: 700;
+        letter-spacing: .12em;
+      }
+      h1 {
+        margin: 0;
+        font-family: Bahnschrift, "Microsoft YaHei", sans-serif;
+        font-size: clamp(34px, 2.3vw, 46px);
+        font-weight: 700;
+        letter-spacing: -.03em;
+      }
+      .sub { margin: 9px 0 0; color: var(--muted); font-size: 15px; }
+      .hero-metrics { display: flex; gap: 10px; }
+      .metric {
+        min-width: 132px;
+        padding: 13px 16px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: rgba(23, 23, 23, .88);
+      }
+      .metric span {
+        display: block;
+        color: var(--muted);
+        font-family: "Cascadia Mono", Consolas, monospace;
+        font-size: 11px;
+        letter-spacing: .08em;
+      }
+      .metric strong { display: block; margin-top: 3px; color: var(--data); font-family: Bahnschrift, sans-serif; font-size: 28px; }
+      .grid {
+        display: grid;
+        grid-template-columns: minmax(420px, 500px) minmax(0, 1fr);
+        gap: 18px;
+        align-items: start;
+      }
+      .card {
+        min-width: 0;
+        padding: 22px;
+        border: 1px solid var(--line);
+        border-radius: 9px;
+        background: rgba(23, 23, 23, .96);
+        box-shadow: 0 14px 36px rgba(0,0,0,.16);
+      }
+      .panel-settings { grid-column: 1; grid-row: 1 / span 2; align-self: stretch; }
+      .panel-batch { grid-column: 2; grid-row: 1; }
+      .panel-skus { grid-column: 2; grid-row: 2; }
+      .settings-block + .settings-block {
+        margin-top: 28px;
+        padding-top: 28px;
+        border-top: 1px solid var(--line);
+      }
+      .section-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 14px;
+        margin-bottom: 18px;
+      }
+      .section-title { display: flex; align-items: center; gap: 12px; min-width: 0; }
+      .step {
+        flex: 0 0 auto;
+        color: var(--accent);
+        font-family: "Cascadia Mono", Consolas, monospace;
+        font-size: 13px;
+        font-weight: 700;
+      }
+      h2 { margin: 0; font-size: 18px; font-weight: 700; }
+      label { display: block; margin: 14px 0 7px; color: #c4bfb9; font-size: 14px; font-weight: 600; }
+      input, textarea, select {
+        width: 100%;
+        min-height: 46px;
+        padding: 10px 12px;
+        border: 1px solid var(--line-strong);
+        border-radius: 6px;
+        background: var(--field);
+        color: #fff;
+      }
+      input:hover, textarea:hover, select:hover { border-color: #665f59; }
+      textarea { min-height: 126px; resize: vertical; line-height: 1.6; }
+      input::placeholder, textarea::placeholder { color: #68635f; }
+      input[type="file"] { min-height: 54px; padding: 7px; color: var(--muted); font-size: 14px; }
+      input[type="file"]::file-selector-button {
+        height: 38px;
+        margin-right: 13px;
+        padding: 0 16px;
+        border: 0;
+        border-radius: 4px;
+        background: #2a2725;
+        color: #fff;
+        cursor: pointer;
+      }
+      .folder-picker { margin: 16px 0 14px; }
+      .batch-folder-action {
+        display: grid;
+        gap: 7px;
+        padding: 18px;
+        border: 1px solid rgba(255, 122, 61, .8);
+        border-left: 5px solid var(--accent);
+        border-radius: 7px;
+        background: linear-gradient(90deg, rgba(255, 122, 61, .13), rgba(255, 122, 61, .025));
+        box-shadow: inset 0 0 0 1px rgba(255, 122, 61, .06);
+      }
+      .batch-folder-action strong { color: #fff; font-size: 17px; }
+      .batch-folder-action small { color: #bdb5ae; font-size: 13px; font-weight: 400; }
+      .batch-folder-action input[type="file"] {
+        width: 100%;
+        margin-top: 5px;
+        border-color: rgba(255, 122, 61, .45);
+        background: #111;
+      }
+      .batch-folder-action input[type="file"]::file-selector-button {
+        background: var(--accent);
+        color: #fff;
+        font-weight: 700;
+      }
+      .batch-folder-ready {
+        color: #75d99b;
+        font-family: "Cascadia Mono", Consolas, monospace;
+        font-size: 13px;
+      }
+      .product-tree {
+        margin: 16px 0;
+        padding: 18px;
+        border: 1px solid #3b3734;
+        border-radius: 7px;
+        background: #111;
+      }
+      .product-tree-head {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 12px;
+        padding-bottom: 12px;
+        border-bottom: 1px solid #2c2927;
+      }
+      .product-tree-head strong { color: #fff; font-size: 16px; }
+      .product-tree-head span { color: var(--data); font-size: 13px; }
+      .product-root {
+        margin-top: 14px;
+        padding: 13px 15px;
+        border: 1px solid rgba(255, 122, 61, .65);
+        border-radius: 6px;
+        background: rgba(255, 122, 61, .1);
+      }
+      .product-root span {
+        display: block;
+        color: #ff9a68;
+        font-family: "Cascadia Mono", Consolas, monospace;
+        font-size: 11px;
+        letter-spacing: .08em;
+      }
+      .product-root strong {
+        display: block;
+        margin-top: 5px;
+        overflow: hidden;
+        color: #fff;
+        font-size: 18px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .tree-children {
+        display: grid;
+        gap: 0;
+        margin-left: 20px;
+        padding-left: 23px;
+        border-left: 1px solid #59524d;
+      }
+      .tree-row {
+        position: relative;
+        display: grid;
+        grid-template-columns: 118px minmax(0, 1fr);
+        gap: 15px;
+        align-items: start;
+        min-width: 0;
+        padding: 13px 0;
+        border-bottom: 1px solid #262321;
+      }
+      .tree-row:last-child { border-bottom: 0; }
+      .tree-row::before {
+        position: absolute;
+        top: 25px;
+        right: 100%;
+        width: 24px;
+        border-top: 1px solid #59524d;
+        content: "";
+      }
+      .tree-label {
+        color: #bdb5ae;
+        font-size: 13px;
+        font-weight: 700;
+      }
+      .tree-value { min-width: 0; color: #f1ede8; line-height: 1.55; }
+      .tree-image-strip {
+        display: flex;
+        gap: 9px;
+        min-width: 0;
+        padding-bottom: 3px;
+        overflow-x: auto;
+      }
+      .tree-image {
+        flex: 0 0 88px;
+        min-width: 0;
+        padding: 5px;
+        border: 1px solid #45403c;
+        border-radius: 4px;
+        background: #1b1918;
+      }
+      .tree-image img {
+        width: 76px;
+        height: 62px;
+        border-radius: 3px;
+        object-fit: cover;
+        background: #080808;
+      }
+      .tree-image span {
+        display: block;
+        margin-top: 4px;
+        overflow: hidden;
+        color: #aaa29b;
+        font-size: 10px;
+        text-align: center;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .tree-sku-list {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+      }
+      .tree-sku-item {
+        display: grid;
+        grid-template-columns: minmax(90px, 1fr) auto 54px;
+        gap: 8px;
+        align-items: center;
+        min-width: 0;
+        padding: 7px 9px;
+        border: 1px solid #3e5262;
+        border-radius: 5px;
+        background: #15212a;
+        color: #b9e4ff;
+      }
+      .tree-sku-item strong {
+        overflow: hidden;
+        font-family: "Cascadia Mono", Consolas, monospace;
+        font-size: 12px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .tree-sku-item b { color: #6d899c; font-size: 14px; }
+      .tree-sku-item img {
+        width: 54px;
+        height: 42px;
+        border-radius: 3px;
+        object-fit: cover;
+        background: #080808;
+      }
+      .tree-sku-item.is-missing {
+        border-color: rgba(255, 92, 98, .75);
+        border-style: dashed;
+        background: rgba(255, 92, 98, .08);
+        color: #ff9ca0;
+      }
+      .tree-missing { color: #ff8589; font-size: 12px; font-weight: 700; }
+      .tree-description { color: #c8c1ba; white-space: pre-wrap; }
+      .notice { margin: 0; color: var(--data); font-size: 14px; line-height: 1.6; }
+      .drop-hint {
+        margin-top: 14px;
+        padding: 26px;
+        border: 1px dashed #514a45;
+        border-radius: 7px;
+        background: #141312;
+        color: var(--muted);
+        text-align: center;
+      }
+      .drop-hint strong { display: block; margin-bottom: 6px; color: #e6e1dc; font-size: 16px; }
+      .attribute {
+        display: grid;
+        grid-template-columns: 126px minmax(0, 1fr) auto;
+        gap: 10px;
+        align-items: end;
+        padding: 15px 0;
+        border-top: 1px solid #2a2826;
+      }
+      .attribute:first-of-type { border-top: 0; }
+      .attribute label { margin-top: 0; }
+      .attribute button { min-height: 46px; }
+      .actions { display: flex; gap: 8px; justify-content: flex-end; }
+      .actions button { flex: 0 0 auto; }
+      .table-shell {
+        width: 100%;
+        overflow: auto;
+        border: 1px solid #302d2b;
+        border-radius: 7px;
+        background: #141414;
+      }
+      table { width: 100%; border-collapse: collapse; font-size: 14px; }
+      .sku-table { min-width: 1080px; }
+      th, td { padding: 11px 12px; border-bottom: 1px solid #2d2a28; text-align: left; vertical-align: middle; }
+      th {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        background: #201e1d;
+        color: #b8b1ab;
+        font-family: "Cascadia Mono", Consolas, monospace;
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: .04em;
+        white-space: nowrap;
+      }
+      tbody tr:last-child td { border-bottom: 0; }
+      tbody tr:hover { background: rgba(255, 122, 61, .035); }
+      tbody tr.is-selected { background: rgba(255, 122, 61, .1); box-shadow: inset 3px 0 0 var(--accent); }
+      tbody tr[tabindex] { cursor: pointer; }
+      td:first-child { color: #f4f1ed; font-weight: 600; }
+      td input, td select { min-width: 108px; min-height: 40px; padding: 7px 9px; }
+      .batch-title { min-width: 270px; }
+      .pagination { display: flex; gap: 6px; justify-content: center; align-items: center; margin-top: 12px; }
+      .pagination button { min-width: 40px; min-height: 38px; padding: 0 11px; }
+      .pagination .active { border-color: var(--accent); background: var(--accent-soft); color: #fff; }
+      .export-progress { margin-top: 12px; }
+      .progress-track { height: 7px; overflow: hidden; border-radius: 999px; background: #292624; }
+      .progress-bar { height: 100%; border-radius: inherit; background: var(--accent); transition: width .2s ease; }
+      .progress-text { display: block; margin-top: 7px; color: #ff9a68; font-size: 14px; text-align: right; }
+      .help-widget { position: fixed; right: 22px; bottom: 20px; z-index: 20; }
+      .help-button { min-width: 64px; box-shadow: 0 12px 30px rgba(0,0,0,.32); }
+      .help-panel {
+        position: absolute;
+        right: 0;
+        bottom: 50px;
+        width: 310px;
+        padding: 17px;
+        border: 1px solid var(--line-strong);
+        border-radius: 8px;
+        background: #211f1d;
+        box-shadow: 0 20px 50px rgba(0,0,0,.48);
+      }
+      .help-panel h3 { margin: 0 0 10px; font-size: 15px; }
+      .help-panel ol { margin: 0; padding-left: 20px; color: #c0bab4; font-size: 12px; line-height: 1.8; }
+      .help-panel .ghost { width: 100%; margin-top: 12px; }
+      @media (max-width: 1100px) {
+        .grid { grid-template-columns: 1fr; }
+        .panel-settings, .panel-batch, .panel-skus { grid-column: 1; grid-row: auto; }
+      }
+      @media (max-width: 720px) {
+        .app { padding: 18px 14px 70px; }
+        .module-hero { grid-template-columns: 1fr; align-items: start; }
+        .hero-metrics { width: 100%; }
+        .metric { flex: 1; min-width: 0; }
+        .tree-row { grid-template-columns: 1fr; gap: 7px; }
+        .tree-sku-list { grid-template-columns: 1fr; }
+        .attribute { grid-template-columns: 1fr auto; }
+        .attribute > div { grid-column: 1 / -1; }
+        .attribute button { grid-column: 2; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; }
+      }
+    </style>
+  </head>
+  <body>
+    <main id="app" class="app">
+      <header class="module-hero">
+        <div>
+          <span class="eyebrow">PRODUCT IMPORT MANIFEST / MODULE 04</span>
+          <h1>妙手商品导入助手</h1>
+          <p class="sub">把 Listing 文件夹整理成可直接上传的 Excel 与产品素材包。</p>
+        </div>
+        <div class="hero-metrics" aria-label="当前批次统计">
+          <div class="metric"><span>LISTING</span><strong>{{ batchProducts.length }}</strong></div>
+          <div class="metric"><span>IMAGES</span><strong>{{ batchImageCount }}</strong></div>
+          <div class="metric"><span>SKU</span><strong>{{ skus.length }}</strong></div>
+        </div>
+      </header>
+
+      <div class="grid">
+        <section class="card panel-settings">
+          <div class="settings-block">
+            <div class="section-head">
+              <div class="section-title"><span class="step">01</span><h2>商品公共信息</h2></div>
+            </div>
+            <label>类目</label>
+            <input v-model="product.category" placeholder="例如：家居服饰" />
+            <label>商品描述</label>
+            <textarea v-model="product.description" placeholder="此描述将应用到全部批量商品"></textarea>
+          </div>
+          <div class="settings-block">
+            <div class="section-head">
+              <div class="section-title"><span class="step">03</span><h2>定义 SKU 组合</h2></div>
+            </div>
+            <div class="attribute" v-for="(attribute, index) in attributes" :key="index">
+              <div><label>属性 {{ index + 1 }} 名称</label><input v-model="attribute.name" placeholder="如颜色、尺寸" /></div>
+              <div><label>属性值（以逗号分隔）</label><input v-model="attribute.valuesText" @input="generateSkus" placeholder="红色, 蓝色" /></div>
+              <button class="ghost" @click="clearAttribute(index)">清空</button>
+            </div>
+            <p class="notice">最多两个属性。两个属性分别有 2 个值时，系统自动生成 2 × 2 = 4 个 SKU。</p>
+          </div>
+        </section>
+
+        <section class="card panel-batch">
+          <div class="section-head">
+            <div class="section-title"><span class="step">02</span><h2>载入 Listing 文件夹</h2></div>
+            <span v-if="batchProducts.length" class="notice">{{ batchProducts.length }} 个 Listing · {{ batchImageCount }} 张图</span>
+          </div>
+          <p class="notice">支持从“套图生成”自动导入，也可以手动选择父文件夹。每个子文件夹名称作为 Listing，内部图片按文件名排序为主图。</p>
+          <label class="folder-picker batch-folder-action">
+            <strong>导入渲染结果文件夹</strong>
+            <small>套图批量导出完成后会自动跳转并载入。手动导入结构必须为：父文件夹 / Listing / 主图1、主图2…</small>
+            <input type="file" webkitdirectory multiple @change="selectBatchFolder" />
+            <span v-if="batchFolderName" class="batch-folder-ready">已载入：{{ batchFolderName }}</span>
+          </label>
+          <section v-if="activeBatchProduct" class="product-tree" aria-label="当前 Listing 产品结构">
+            <div class="product-tree-head">
+              <strong>产品结构预览</strong>
+              <span>点击下方 Listing 行切换预览</span>
+            </div>
+            <div class="product-root">
+              <span>PRODUCT / LISTING</span>
+              <strong>{{ activeBatchProduct.listing }}</strong>
+            </div>
+            <div class="tree-children">
+              <div class="tree-row">
+                <div class="tree-label">类目</div>
+                <div class="tree-value">{{ product.category || '未填写类目' }}</div>
+              </div>
+              <div class="tree-row">
+                <div class="tree-label">产品主图</div>
+                <div class="tree-image-strip">
+                  <div v-for="(image, index) in activeBatchProduct.images" :key="`main-${image.name}-${index}`" class="tree-image">
+                    <img :src="image.url" :alt="image.name" />
+                    <span>主图 {{ index + 1 }}</span>
+                  </div>
+                </div>
+              </div>
+              <div class="tree-row">
+                <div class="tree-label">SKU 图片</div>
+                <div class="tree-sku-list">
+                  <div
+                    v-for="assignment in activeSkuAssignments"
+                    :key="assignment.key"
+                    class="tree-sku-item"
+                    :class="{ 'is-missing': assignment.missing }"
+                  >
+                    <strong>{{ assignment.sku.code || assignment.sku.label }}</strong>
+                    <b aria-hidden="true">→</b>
+                    <img v-if="assignment.image" :src="assignment.image.url" :alt="assignment.image.name" />
+                    <span v-else class="tree-missing">缺图</span>
+                  </div>
+                </div>
+              </div>
+              <div class="tree-row">
+                <div class="tree-label">详情图</div>
+                <div class="tree-image-strip">
+                  <div v-for="(image, index) in activeBatchProduct.images" :key="`detail-${image.name}-${index}`" class="tree-image">
+                    <img :src="image.url" :alt="image.name" />
+                    <span>详情图 {{ index + 1 }}</span>
+                  </div>
+                </div>
+              </div>
+              <div class="tree-row">
+                <div class="tree-label">产品描述</div>
+                <div class="tree-value tree-description">{{ product.description || '未填写产品描述' }}</div>
+              </div>
+            </div>
+          </section>
+          <div v-if="!batchProducts.length" class="drop-hint">
+            <strong>等待载入商品目录</strong>
+            文件结构：父文件夹 / Listing / 主图1、主图2、主图3…
+          </div>
+          <div v-if="batchProducts.length" class="table-shell">
+            <table>
+              <thead><tr><th>LISTING</th><th>商品标题</th><th>主图</th></tr></thead>
+              <tbody>
+                <tr
+                  v-for="batchProduct in paginatedBatchProducts"
+                  :key="batchProduct.listing"
+                  :class="{ 'is-selected': activeListingKey === batchProduct.listing }"
+                  tabindex="0"
+                  @click="selectBatchProduct(batchProduct)"
+                  @keydown.enter="selectBatchProduct(batchProduct)"
+                >
+                  <td>{{ batchProduct.listing }}</td>
+                  <td><input v-model="batchProduct.title" class="batch-title" /></td>
+                  <td>{{ batchProduct.images.length }} 张</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div v-if="batchPageCount > 1" class="pagination">
+            <button class="ghost" :disabled="batchPage === 1" @click="goToBatchPage(batchPage - 1)">上一页</button>
+            <button v-for="page in batchPageCount" :key="page" :class="{ active: page === batchPage, ghost: page !== batchPage }" @click="goToBatchPage(page)">{{ page }}</button>
+            <button class="ghost" :disabled="batchPage === batchPageCount" @click="goToBatchPage(batchPage + 1)">下一页</button>
+          </div>
+        </section>
+
+        <section class="card panel-skus">
+          <div class="section-head">
+            <div class="section-title"><span class="step">04</span><h2>检查并导出 SKU 清单</h2></div>
+            <div class="actions">
+              <button :disabled="isExporting" @click="exportZip">{{ isExporting ? `正在导出 ${exportProgress}%` : '导出妙手上传压缩包' }}</button>
+            </div>
+          </div>
+          <div class="table-shell">
+            <table class="sku-table">
+              <thead><tr><th>属性组合</th><th>SKU 编码</th><th>价格</th><th>库存</th><th>重量 KG</th><th>尺寸 CM</th><th>SKU 图片</th></tr></thead>
+              <tbody>
+                <tr v-for="sku in skus" :key="sku.key">
+                  <td>{{ sku.label }}</td><td><input v-model="sku.code" /></td><td><input v-model="sku.price" type="number" /></td><td><input v-model="sku.stock" type="number" /></td><td><input v-model="sku.weight" type="number" step="0.001" /></td><td><input v-model="sku.dimensions" placeholder="长；宽；高" /></td>
+                  <td>
+                    <select v-model.number="sku.imageIndex">
+                      <option v-if="!maxBatchImageCount" :value="0">请先选择文件夹</option>
+                      <option v-for="imageNumber in maxBatchImageCount" :key="imageNumber" :value="imageNumber - 1">第 {{ imageNumber }} 张</option>
+                    </select>
+                  </td>
+                </tr>
+                <tr v-if="!skus.length"><td colspan="7">填写 SKU 属性值后，系统会自动生成 SKU。</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="notice">图片按文件名排序。某个 Listing 的图片数量少于所选序号时，该商品的对应 SKU 图留空。</p>
+          <div v-if="isExporting || exportProgress === 100" class="export-progress">
+            <div class="progress-track"><div class="progress-bar" :style="{ width: `${exportProgress}%` }"></div></div>
+            <span class="progress-text">{{ exportProgress === 100 ? '导出完成' : `正在打包：${exportProgress}%` }}</span>
+          </div>
+        </section>
+      </div>
+
+      <aside class="help-widget">
+        <button class="help-button" :aria-expanded="showHelp" aria-label="打开使用说明" @click="toggleHelp">用法</button>
+        <div v-if="showHelp" class="help-panel">
+          <h3>简单用法</h3>
+          <ol>
+            <li>在“套图生成”批量导出，完成后会自动跳转到这里并载入结果。</li>
+            <li>也可以手动选择文件夹，结构必须为“父文件夹 / Listing / 主图1、主图2…”。</li>
+            <li>导出压缩包后，进入妙手“产品采集 → 导入采集”，直接上传压缩包。</li>
+          </ol>
+          <button class="ghost" @click="toggleHelp">关闭</button>
+        </div>
+      </aside>
+    </main>
+
+    <script>
+      const { createApp } = Vue
+      createApp({
+        /** Returns the initial editable page state. */
+        data() {
+          return {
+            product: { category: '', description: '' },
+            batchFolderName: '',
+            batchProducts: [],
+            activeListingKey: '',
+            batchPage: 1,
+            batchPageSize: 5,
+            isExporting: false,
+            exportProgress: 0,
+            showHelp: false,
+            attributes: [{ name: '颜色', valuesText: '红色, 蓝色' }, { name: '尺寸', valuesText: 'S, M' }],
+            skus: []
+          }
+        },
+        computed: {
+          /** Counts all recognized images in the current batch. */
+          batchImageCount() {
+            let count = 0
+            for (const batchProduct of this.batchProducts) count += batchProduct.images.length
+            return count
+          },
+          /** Returns the largest image count among all batch products. */
+          maxBatchImageCount() {
+            let maxCount = 0
+            for (const batchProduct of this.batchProducts) {
+              if (batchProduct.images.length > maxCount) maxCount = batchProduct.images.length
+            }
+            return maxCount
+          },
+          /** Returns the total number of batch table pages. */
+          batchPageCount() {
+            return Math.max(1, Math.ceil(this.batchProducts.length / this.batchPageSize))
+          },
+          /** Returns the batch products visible on the current page. */
+          paginatedBatchProducts() {
+            const products = []
+            const startIndex = (this.batchPage - 1) * this.batchPageSize
+            const endIndex = Math.min(startIndex + this.batchPageSize, this.batchProducts.length)
+            for (let index = startIndex; index < endIndex; index++) products.push(this.batchProducts[index])
+            return products
+          },
+          /** Returns the Listing currently selected from the batch table. */
+          activeBatchProduct() {
+            for (const batchProduct of this.batchProducts) {
+              if (batchProduct.listing === this.activeListingKey) return batchProduct
+            }
+            return this.batchProducts.length ? this.batchProducts[0] : null
+          },
+          /** Returns each SKU and its image assignment for the selected Listing. */
+          activeSkuAssignments() {
+            const batchProduct = this.activeBatchProduct
+            if (!batchProduct) return []
+            const assignments = []
+            for (let index = 0; index < this.skus.length; index++) {
+              const sku = this.skus[index]
+              const imageIndex = Number(sku.imageIndex)
+              const safeImageIndex = Number.isInteger(imageIndex) && imageIndex >= 0 ? imageIndex : 0
+              const image = batchProduct.images[safeImageIndex] || null
+              assignments.push({
+                key: `${sku.key}-${index}`,
+                sku,
+                imageIndex: safeImageIndex,
+                image,
+                missing: !image
+              })
+            }
+            return assignments
+          }
+        },
+        /** Generates the default SKU combinations after the page is mounted. */
+        mounted() {
+          this.generateSkus()
+          window.addEventListener('message', this.handleWorkflowDirectoryMessage)
+        },
+        /** Removes the module 3 directory handoff listener before the page is destroyed. */
+        beforeUnmount() {
+          window.removeEventListener('message', this.handleWorkflowDirectoryMessage)
+        },
+        methods: {
+          /** Opens or closes the fixed usage help bubble. */
+          toggleHelp() {
+            this.showHelp = !this.showHelp
+          },
+          /** Releases temporary URLs and clears the previously selected batch. */
+          clearBatchProducts() {
+            for (const batchProduct of this.batchProducts) {
+              for (const image of batchProduct.images) {
+                if (image.url) URL.revokeObjectURL(image.url)
+              }
+            }
+            this.batchProducts = []
+            this.batchFolderName = ''
+            this.activeListingKey = ''
+            this.batchPage = 1
+          },
+          /** Returns whether a selected file is a supported image. */
+          isImageFile(file) {
+            if (file.type && file.type.startsWith('image/')) return true
+            return /\.(avif|bmp|gif|jpe?g|png|webp)$/i.test(file.name)
+          },
+          /** Sorts one product's images by file name for stable numeric selection. */
+          sortBatchProductImages(batchProduct) {
+            for (let index = 1; index < batchProduct.images.length; index++) {
+              const currentImage = batchProduct.images[index]
+              let previousIndex = index - 1
+              while (previousIndex >= 0 && batchProduct.images[previousIndex].name.localeCompare(currentImage.name, 'zh-CN', { numeric: true }) > 0) {
+                batchProduct.images[previousIndex + 1] = batchProduct.images[previousIndex]
+                previousIndex--
+              }
+              batchProduct.images[previousIndex + 1] = currentImage
+            }
+          },
+          /** Reads a parent folder and groups its direct child images by Listing directory. */
+          selectBatchFolder(event) {
+            this.clearBatchProducts()
+            const files = event.target.files
+            if (!files || !files.length) return
+            const groups = Object.create(null)
+            const listingOrder = []
+            for (const file of files) {
+              if (!this.isImageFile(file)) continue
+              const relativePath = file.webkitRelativePath || file.name
+              const parts = relativePath.replace(/\\/g, '/').split('/')
+              if (parts.length < 2) continue
+              let listing = ''
+              if (parts.length === 2) {
+                listing = parts[0]
+              } else if (parts.length === 3) {
+                listing = parts[1]
+              } else continue
+              if (!listing) continue
+              if (!groups[listing]) {
+                groups[listing] = { listing, title: listing, images: [] }
+                listingOrder.push(listing)
+              }
+              groups[listing].images.push({ name: file.name, url: URL.createObjectURL(file), file })
+            }
+            for (const listing of listingOrder) {
+              this.sortBatchProductImages(groups[listing])
+              this.batchProducts.push(groups[listing])
+            }
+            const firstPath = (files[0].webkitRelativePath || '').replace(/\\/g, '/').split('/')
+            this.batchFolderName = firstPath[0] || '批量商品'
+            this.activeListingKey = this.batchProducts.length ? this.batchProducts[0].listing : ''
+          },
+          /** Receives the completed module 3 export directory from the parent workspace. */
+          async handleWorkflowDirectoryMessage(event) {
+            if (event.origin !== window.location.origin) return
+            const payload = event.data
+            if (!payload || payload.type !== 'pod-listing-import-directory') return
+            if (!payload.directoryHandle || payload.directoryHandle.kind !== 'directory') return
+            await this.loadBatchDirectoryHandle(
+              payload.directoryHandle,
+              String(payload.directoryName || payload.directoryHandle.name || '批量商品')
+            )
+          },
+          /** Reads direct Listing folders from an authorized directory handle. */
+          async loadBatchDirectoryHandle(directoryHandle, directoryName) {
+            this.clearBatchProducts()
+            for await (const entry of directoryHandle.entries()) {
+              const listingName = entry[0]
+              const listingHandle = entry[1]
+              if (listingHandle.kind !== 'directory') continue
+              const batchProduct = { listing: listingName, title: listingName, images: [] }
+              for await (const childEntry of listingHandle.entries()) {
+                const fileName = childEntry[0]
+                const fileHandle = childEntry[1]
+                if (fileHandle.kind !== 'file') continue
+                const file = await fileHandle.getFile()
+                if (!this.isImageFile(file)) continue
+                batchProduct.images.push({
+                  name: fileName,
+                  url: URL.createObjectURL(file),
+                  file
+                })
+              }
+              if (!batchProduct.images.length) continue
+              this.sortBatchProductImages(batchProduct)
+              this.batchProducts.push(batchProduct)
+            }
+            this.batchFolderName = directoryName
+            this.activeListingKey = this.batchProducts.length ? this.batchProducts[0].listing : ''
+            this.batchPage = 1
+          },
+          /** Selects one Listing row as the source for the assignment visualization. */
+          selectBatchProduct(batchProduct) {
+            if (!batchProduct) return
+            this.activeListingKey = batchProduct.listing
+          },
+          /** Changes the batch table page within the available range. */
+          goToBatchPage(page) {
+            this.batchPage = Math.min(this.batchPageCount, Math.max(1, page))
+          },
+          /** Converts one comma-separated attribute input into normalized values. */
+          attributeValues(index) {
+            const rawValues = this.attributes[index].valuesText.split(',')
+            const values = []
+            for (const rawValue of rawValues) {
+              const value = rawValue.trim()
+              if (value) values.push(value)
+            }
+            return values
+          },
+          /** Generates the one- or two-dimensional SKU Cartesian product. */
+          generateSkus() {
+            const firstValues = this.attributeValues(0)
+            const secondValues = this.attributeValues(1)
+            const next = []
+            if (!firstValues.length) { this.skus = next; return }
+            for (const first of firstValues) {
+              if (secondValues.length) {
+                for (const second of secondValues) next.push(this.createSku(first, second))
+              } else next.push(this.createSku(first, ''))
+            }
+            this.skus = next
+          },
+          /** Creates one editable SKU row from an attribute combination. */
+          createSku(first, second) {
+            const label = second ? `${this.attributes[0].name}:${first} / ${this.attributes[1].name}:${second}` : `${this.attributes[0].name}:${first}`
+            const code = second ? `${first}-${second}` : first
+            return { key: label, label, code, spec1: first, spec2: second, price: '', stock: '', weight: '', dimensions: '', imageIndex: 0 }
+          },
+          /** Clears one attribute and regenerates the SKU table. */
+          clearAttribute(index) {
+            this.attributes[index].valuesText = ''
+            this.generateSkus()
+          },
+          /** Appends one product and all shared SKU combinations to workbook rows. */
+          appendProductRows(rows, productInfo, useSkuPrefix) {
+            for (let index = 0; index < this.skus.length; index++) {
+              const sku = this.skus[index]
+              const platformSku = useSkuPrefix ? `${productInfo.listing}-${sku.code}` : sku.code
+              rows.push(index === 0
+                ? [productInfo.title, 'CNY', '', '', productInfo.listing, productInfo.description, productInfo.category, '', sku.spec1 || '', sku.spec2 || '', platformSku, Number(sku.price || 0), Number(sku.stock || 0), Number(sku.weight || 0), sku.dimensions]
+                : ['', '', '', '', '', '', '', '', sku.spec1 || '', sku.spec2 || '', platformSku, Number(sku.price || 0), Number(sku.stock || 0), Number(sku.weight || 0), sku.dimensions])
+            }
+          },
+          /** Creates a workbook for one requested batch product. */
+          buildWorkbook(batchProduct) {
+            const headers = ['* 产品标题', '货币类型', '货源链接', '货源平台', '产品主编号', '详情描述', '货源类目', '属性', 'SKU规格1', 'SKU规格2', '平台SKU', '* SKU售价', 'SKU库存', 'SKU重量(KG)', 'SKU尺寸(CM)']
+            const note = '注意事项：同一个商品多个SKU时，SPU级信息只填写第一行；图片通过素材包目录上传。'
+            const rows = [[note], headers]
+            const productInfo = {
+              listing: batchProduct.listing,
+              title: batchProduct.title || batchProduct.listing,
+              category: this.product.category,
+              description: this.product.description
+            }
+            this.appendProductRows(rows, productInfo, false)
+            const sheet = XLSX.utils.aoa_to_sheet(rows)
+            const columns = []
+            for (let index = 0; index < headers.length; index++) columns.push({ wch: 18 })
+            sheet['!cols'] = columns
+            const workbook = XLSX.utils.book_new()
+            XLSX.utils.book_append_sheet(workbook, sheet, 'Worksheet')
+            return XLSX.write(workbook, { bookType: 'xlsx', type: 'array' })
+          },
+          /** Adds one uploaded image file to a ZIP destination when a file exists. */
+          addImage(zip, destination, image) {
+            if (!image.file) return
+            const extension = image.name.includes('.') ? image.name.substring(image.name.lastIndexOf('.')) : '.jpg'
+            zip.file(`${destination}${extension}`, image.file)
+          },
+          /** Adds the image directories for one product to the requested ZIP folder. */
+          addProductAssets(productRoot, images) {
+            const mainFolder = productRoot.folder('产品主图')
+            const skuFolder = productRoot.folder('SKU图')
+            const detailFolder = productRoot.folder('详情图')
+            productRoot.folder('尺寸图表')
+            productRoot.folder('产品视频')
+            productRoot.folder('产品证书')
+            for (let index = 0; index < images.length; index++) {
+              const image = images[index]
+              this.addImage(mainFolder, `主图_${index + 1}`, image)
+              this.addImage(detailFolder, `详情图_${index + 1}`, image)
+            }
+            if (!images.length) return
+            const exportedSpec1 = new Set()
+            for (const sku of this.skus) {
+              if (!sku.spec1 || exportedSpec1.has(sku.spec1)) continue
+              exportedSpec1.add(sku.spec1)
+              const imageIndex = Number(sku.imageIndex)
+              if (imageIndex < 0 || imageIndex >= images.length) continue
+              this.addImage(skuFolder, `${sku.spec1}_${exportedSpec1.size}`, images[imageIndex])
+            }
+          },
+          /** Converts a listing name into a Windows-safe short package name. */
+          safePackageName(rawName) {
+            const raw = rawName || '产品素材包'
+            const safe = raw.replace(/[\\\\/:*?"<>|]/g, '_').trim()
+            return (safe || '产品素材包').slice(0, 40)
+          },
+          /** Updates the visible ZIP generation percentage. */
+          updateExportProgress(metadata) {
+            const percent = Number(metadata.percent) || 0
+            this.exportProgress = Math.min(100, Math.max(0, Math.round(percent)))
+          },
+          /** Exports the complete 妙手 local-material ZIP package. */
+          async exportZip() {
+            if (!this.batchProducts.length || !this.skus.length) {
+              alert('请先选择批量商品父文件夹并生成 SKU 组合。')
+              return
+            }
+            this.isExporting = true
+            this.exportProgress = 0
+            try {
+              const zip = new JSZip()
+              const packageName = this.safePackageName(this.batchFolderName || '批量商品')
+              const root = zip.folder(packageName)
+              for (const batchProduct of this.batchProducts) {
+                const productRoot = root.folder(this.safePackageName(batchProduct.listing))
+                productRoot.file('导入产品模板.xlsx', this.buildWorkbook(batchProduct))
+                this.addProductAssets(productRoot, batchProduct.images)
+              }
+              const progressHandler = this.updateExportProgress.bind(this)
+              const blob = await zip.generateAsync({ type: 'blob' }, progressHandler)
+              const url = URL.createObjectURL(blob)
+              const link = document.createElement('a')
+              link.href = url
+              link.download = `${packageName}-素材包.zip`
+              link.click()
+              URL.revokeObjectURL(url)
+              this.exportProgress = 100
+            } catch (error) {
+              console.error(error)
+              alert('导出失败，请检查商品数据后重试。')
+              this.exportProgress = 0
+            } finally {
+              this.isExporting = false
+            }
+          }
+        }
+      }).mount('#app')
+    </script>
+  </body>
+</html>

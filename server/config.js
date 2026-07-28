@@ -762,6 +762,21 @@ function replaceConfig(input) {
   return currentConfig;
 }
 
+// 仅更新图片生成并发数，保留 config.json 中其他业务配置不变。
+function saveImageApiConcurrency(value) {
+  const rootConfig = readRootConfig();
+  if (!rootConfig.patternRedraw || typeof rootConfig.patternRedraw !== "object") {
+    rootConfig.patternRedraw = {};
+  }
+  if (!rootConfig.patternRedraw.imageApi || typeof rootConfig.patternRedraw.imageApi !== "object") {
+    rootConfig.patternRedraw.imageApi = {};
+  }
+  rootConfig.patternRedraw.imageApi.concurrency = normalizeInteger(value, 1, 10, 1);
+  atomicWriteJson(ROOT_CONFIG_PATH, rootConfig);
+  currentConfig = normalizeConfig(rootConfig, currentKeyConfig);
+  return currentConfig;
+}
+
 // 载入 key.json：完整替换节点池（可动态增减），未提供节点时保留现有池。
 function replaceKeyConfig(input) {
   const source = input && typeof input === "object" ? input : {};
@@ -938,6 +953,7 @@ module.exports = {
   getElementProductSettings,
   replaceConfig,
   replaceKeyConfig,
+  saveImageApiConcurrency,
   selectNextTransModelNode,
   selectTransModelNode,
   saveElementProductSettings,

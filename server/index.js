@@ -1,4 +1,5 @@
 const http = require("http");
+const https = require("https");
 const fs = require("fs");
 const path = require("path");
 
@@ -9,6 +10,7 @@ const {
   getElementProductSettings,
   replaceKeyConfig,
   replaceConfig,
+  saveImageApiConcurrency,
   saveElementProductSettings,
   selectNextTransModelNode,
   selectTransModelNode,
@@ -23,6 +25,7 @@ const APP_PATH = path.join(ROOT, "app", "index.html");
 const LOG_PATH = path.join(RUNTIME_ROOT, "logs", "server.log");
 const DAILY_ACTIVITY_LOG_PATH = path.join(ROOT, "log.txt");
 const IMAGE_EDIT_TIMEOUT_MS = 5 * 60 * 1000;
+const IMAGE_EDIT_KEEP_ALIVE_DELAY_MS = 30 * 1000;
 const INFRINGEMENT_TIMEOUT_MS = 20 * 60 * 1000;
 const MOONSHOT_THINKING_TIMEOUT_MS = 10 * 60 * 1000;
 const MOONSHOT_FAST_TIMEOUT_MS = 3 * 60 * 1000;
@@ -87,6 +90,67 @@ function fetchErrorDetails(error) {
       port: cause.port || ""
     } : null
   };
+}
+
+// 使用 Node 原生 HTTP 客户端转发图片请求，显式控制响应等待超时和 TCP 保活，避免长耗时生成被隐式连接策略中断。
+function requestImageEditUpstream(target, headers, body, signal) {
+  // 创建一次独立的上游请求，并在收到完整响应后返回结果。
+  return new Promise(function sendImageEditRequest(resolve, reject) {
+    const targetUrl = new URL(target);
+    const transport = targetUrl.protocol === "https:" ? https : http;
+    const requestStartedAt = Date.now();
+    const request = transport.request(targetUrl, {
+      method: "POST",
+      headers,
+      agent: false
+    }, function receiveImageEditResponse(upstream) {
+      const chunks = [];
+      appendServerLog(
+        `image API response headers: status=${upstream.statusCode}; elapsedMs=${Date.now() - requestStartedAt}`
+      );
+      // 按顺序收集上游响应数据块。
+      upstream.on("data", function collectImageEditChunk(chunk) {
+        chunks.push(chunk);
+      });
+      // 合并响应数据并记录完整耗时。
+      upstream.on("end", function finishImageEditResponse() {
+        resolve({
+          status: upstream.statusCode || 502,
+          headers: upstream.headers,
+          body: Buffer.concat(chunks),
+          elapsedMs: Date.now() - requestStartedAt
+        });
+      });
+      upstream.on("error", reject);
+    });
+    // 浏览器停止任务时同步销毁上游连接。
+    const abortRequest = function abortImageEditRequest() {
+      const error = new Error("This operation was aborted");
+      error.name = "AbortError";
+      request.destroy(error);
+    };
+    // 上游连接持续无响应达到五分钟时才终止请求。
+    request.setTimeout(IMAGE_EDIT_TIMEOUT_MS, function handleImageEditTimeout() {
+      const error = new Error(`图片生成上游连接 ${IMAGE_EDIT_TIMEOUT_MS / 1000} 秒无响应`);
+      error.name = "TimeoutError";
+      request.destroy(error);
+    });
+    // 30 秒发送 TCP 保活探测，防止长时间无响应体时被本地网络设备当作空闲连接清理。
+    request.on("socket", function configureImageEditSocket(socket) {
+      socket.setKeepAlive(true, IMAGE_EDIT_KEEP_ALIVE_DELAY_MS);
+    });
+    request.on("error", reject);
+    // 请求关闭后移除中止监听，避免长期保留任务对象。
+    request.on("close", function removeImageEditAbortListener() {
+      signal.removeEventListener("abort", abortRequest);
+    });
+    if (signal.aborted) {
+      abortRequest();
+      return;
+    }
+    signal.addEventListener("abort", abortRequest, { once: true });
+    request.end(body);
+  });
 }
 
 // 将单个日期数字补齐为两位。
@@ -766,24 +830,27 @@ async function proxyImageEdit(req, res) {
   const timeoutSignal = AbortSignal.timeout(IMAGE_EDIT_TIMEOUT_MS);
   const upstreamSignal = AbortSignal.any([clientController.signal, timeoutSignal]);
   res.once("close", abortClientRequest);
+  const requestStartedAt = Date.now();
+  appendServerLog(`image API request started: target=${target}; bytes=${body.length}; timeoutMs=${IMAGE_EDIT_TIMEOUT_MS}`);
   try {
-    const upstream = await fetch(target, {
-      method: "POST",
-      headers: {
+    const upstream = await requestImageEditUpstream(target, {
         "Authorization": `Bearer ${config.apiKey}`,
-        "Content-Type": req.headers["content-type"] || "application/octet-stream"
-      },
-      body,
-      signal: upstreamSignal
-    });
-    const upstreamBody = Buffer.from(await upstream.arrayBuffer());
-    return send(res, upstream.status, upstreamBody, {
-      "Content-Type": upstream.headers.get("content-type") || "application/octet-stream",
+        "Content-Type": req.headers["content-type"] || "application/octet-stream",
+        "Content-Length": String(body.length),
+        "Connection": "close"
+      }, body, upstreamSignal);
+    appendServerLog(
+      `image API request completed: status=${upstream.status}; elapsedMs=${upstream.elapsedMs}; responseBytes=${upstream.body.length}`
+    );
+    return send(res, upstream.status, upstream.body, {
+      "Content-Type": upstream.headers["content-type"] || "application/octet-stream",
       "X-Image-Api-Target": target
     });
   } catch (error) {
     const details = fetchErrorDetails(error);
-    appendServerLog(`image API proxy failed: ${JSON.stringify(details)}`);
+    appendServerLog(
+      `image API proxy failed: elapsedMs=${Date.now() - requestStartedAt}; ${JSON.stringify(details)}`
+    );
     if (res.destroyed) return;
     const timedOut = timeoutSignal.aborted;
     return sendJson(res, timedOut ? 504 : 502, {
@@ -1396,6 +1463,28 @@ function serveMockupHtml(res) {
   }
 }
 
+// 保存用户手动设置的图片生成并发数，并立即返回最新公开配置。
+async function handleImageConcurrency(req, res) {
+  try {
+    const input = await readJsonBody(req, 16 * 1024);
+    const config = saveImageApiConcurrency(input.concurrency);
+    appendServerLog(`image concurrency updated from UI: ${config.patternRedraw.imageApi.concurrency}`);
+    return sendJson(res, 200, publicConfig(config));
+  } catch (error) {
+    return sendJson(res, 400, { error: { message: error.message, type: "concurrency_config_error" } });
+  }
+}
+
+// 发送独立的商品导入页面，隔离其 Vue 状态和表格样式。
+function serveListingImportHtml(res) {
+  try {
+    const data = fs.readFileSync(path.join(ROOT, "app", "listing-import.html"));
+    return send(res, 200, data, { "Content-Type": "text/html; charset=utf-8" });
+  } catch (error) {
+    return sendJson(res, 404, { error: { message: "找不到商品导入页面", type: "not_found" } });
+  }
+}
+
 // 发送编译后的模块3静态资源，并禁止路径跳出模块资源目录。
 function serveMockupAsset(res, url) {
   const prefix = "/app/mockup-assets/";
@@ -1533,11 +1622,13 @@ const server = http.createServer(async (req, res) => {
   if (req.method === "OPTIONS") return send(res, 204, "");
   if (req.method === "GET" && (url.pathname === "/" || url.pathname === "/beecode-image-batch.html")) return serveHtml(res);
   if (req.method === "GET" && (url.pathname === "/mockup" || url.pathname === "/mockup/")) return serveMockupHtml(res);
+  if (req.method === "GET" && (url.pathname === "/listing-import" || url.pathname === "/listing-import/")) return serveListingImportHtml(res);
   if (req.method === "GET" && url.pathname.startsWith("/app/mockup-assets/")) return serveMockupAsset(res, url);
   if (req.method === "GET" && url.pathname === "/app/vendor/jszip.min.js") return serveJsZipScript(res);
   if (req.method === "GET" && url.pathname === "/app/element-extraction.js") return serveElementExtractionScript(res);
   if (req.method === "GET" && url.pathname === "/app/workflow/workflow-manager.js") return serveWorkflowManagerScript(res);
   if ((req.method === "GET" || req.method === "POST") && ["/config", "/api/config"].includes(url.pathname)) return handleConfig(req, res);
+  if (req.method === "POST" && url.pathname === "/api/image-concurrency") return handleImageConcurrency(req, res);
   if (req.method === "GET" && url.pathname === "/api/auth") return handleAuthStatus(req, res);
   if (req.method === "POST" && url.pathname === "/api/keys") return handleKeys(req, res);
   if (req.method === "POST" && url.pathname === "/api/trans-model-node") return handleTransModelNode(req, res);

@@ -99,7 +99,8 @@
 
     .module-view.hidden, .actions.hidden { display: none; }
 
-    .mockup-module {
+    .mockup-module,
+    .listing-import-module {
       height: calc(100vh - 82px);
       min-height: 680px;
       border: 1px solid var(--line);
@@ -108,7 +109,8 @@
       background: var(--panel);
     }
 
-    .mockup-frame {
+    .mockup-frame,
+    .listing-import-frame {
       display: block;
       width: 100%;
       height: 100%;
@@ -128,7 +130,8 @@
 
     body.mockup-mode .head { flex: 0 0 auto; }
 
-    body.mockup-mode .mockup-module {
+    body.mockup-mode .mockup-module,
+    body.mockup-mode .listing-import-module {
       flex: 1 1 auto;
       height: auto;
       min-height: 0;
@@ -239,6 +242,37 @@
     }
 
     .daily-stats-badge.hidden { display: none; }
+
+    .concurrency-setting {
+      display: flex;
+      flex: 0 0 auto;
+      align-items: center;
+      gap: 7px;
+      height: 34px;
+      padding: 0 9px;
+      border: 1px solid #3a3a3a;
+      border-radius: 6px;
+      background: #171717;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .concurrency-setting input {
+      width: 42px;
+      height: 24px;
+      padding: 0 4px;
+      border: 1px solid #4a4a4a;
+      border-radius: 4px;
+      background: #0f0f0f;
+      color: #ffffff;
+      font: 700 12px/1 Consolas, monospace;
+      text-align: center;
+      outline: none;
+    }
+
+    .concurrency-setting input:focus {
+      border-color: var(--orange);
+    }
 
     .daily-stats-bubble {
       position: absolute;
@@ -918,6 +952,40 @@
       background: rgba(0, 184, 107, 0.08);
     }
 
+    .key-drop-zone {
+      display: grid;
+      gap: 7px;
+      margin: 0 0 14px;
+      padding: 24px 18px;
+      border: 2px dashed #535353;
+      border-radius: 10px;
+      background: #111;
+      text-align: center;
+      transition: border-color 0.15s ease, background 0.15s ease, transform 0.15s ease;
+    }
+
+    .key-drop-zone.is-dragging {
+      border-color: var(--accent);
+      background: rgba(255, 122, 61, 0.1);
+      transform: translateY(-2px);
+    }
+
+    .key-drop-zone strong {
+      color: #fff;
+      font-size: 15px;
+    }
+
+    .key-drop-zone span {
+      color: #8f969e;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .key-drop-zone button {
+      justify-self: center;
+      margin-top: 6px;
+    }
+
     .login-actions {
       display: flex;
       flex-direction: column;
@@ -973,6 +1041,8 @@
       font-size: 13px;
       line-height: 1.55;
     }
+
+    .key-dialog .key-drop-zone { margin-bottom: 16px; }
 
     .key-dialog-actions {
       display: flex;
@@ -1362,10 +1432,14 @@
   <div id="loginGate" class="login-gate" role="dialog" aria-modal="true" aria-labelledby="loginTitle">
     <div class="login-card">
       <h1 id="loginTitle" class="login-brand">POD 图像工作台</h1>
-      <p class="login-sub">请导入 <code>key.json</code> 完成登录。系统会先检查项目根目录是否已有密钥文件。</p>
+      <p class="login-sub">直接拖入 <code>key.json</code> 文件完成登录。系统会先检查项目根目录是否已有密钥文件。</p>
       <div id="loginStatus" class="login-status">正在检查根目录 key.json…</div>
+      <div id="loginKeyDrop" class="key-drop-zone">
+        <strong>把 key.json 拖到这里</strong>
+        <span>仅接收 JSON 文件，松开后立即导入</span>
+        <button id="loginImportKey" type="button">选择 key.json（备用）</button>
+      </div>
       <div class="login-actions">
-        <button id="loginImportKey" class="primary" type="button">导入 key.json 并登录</button>
         <button id="loginRecheck" type="button">重新检查根目录</button>
       </div>
       <p class="login-hint">密钥文件需包含 Moonshot 的 apikey，以及 trans_model_pool 节点（含各节点 apikey）。导入后会写入项目根目录 key.json。</p>
@@ -1376,10 +1450,14 @@
   <div id="keyModifyDialog" class="key-dialog-backdrop" hidden role="dialog" aria-modal="true" aria-labelledby="keyModifyTitle">
     <div class="key-dialog">
       <h2 id="keyModifyTitle">修改密钥</h2>
-      <p>选择本机的 <code>key.json</code> 文件导入。导入后将覆盖项目根目录现有密钥与节点配置。</p>
+      <p>直接拖入新的 <code>key.json</code> 文件。导入后将覆盖项目根目录现有密钥与节点配置。</p>
+      <div id="modifyKeyDrop" class="key-drop-zone">
+        <strong>把新的 key.json 拖到这里</strong>
+        <span>仅接收 JSON 文件，松开后立即替换</span>
+        <button id="keyModifyPick" type="button">选择 key.json（备用）</button>
+      </div>
       <div class="key-dialog-actions">
         <button id="keyModifyCancel" type="button">取消</button>
-        <button id="keyModifyPick" class="primary" type="button">选择 key.json</button>
       </div>
     </div>
   </div>
@@ -1391,6 +1469,7 @@
           <button id="patternRedrawTab" class="module-tab active" type="button">印花重绘</button>
           <button id="elementExtractionTab" class="module-tab" type="button">元素提取</button>
           <button id="mockupTab" class="module-tab" type="button">套图生成</button>
+          <button id="listingImportTab" class="module-tab" type="button">商品导入</button>
         </nav>
         <div class="config-line">
           <button id="pickConfig" type="button">修改</button>
@@ -1412,6 +1491,10 @@
           <span id="dailyStatsRequests" class="daily-stats-requests">请求：生成 0 · 侵权 0 · 提取 0</span>
         </div>
       </div>
+      <label class="concurrency-setting" title="控制同时发送的图片生成请求数；修改后对后续排队任务生效">
+        并发
+        <input id="concurrencyInput" type="number" min="1" max="10" step="1" value="1" inputmode="numeric" aria-label="图片生成并发数">
+      </label>
       <div id="patternRedrawActions" class="actions">
         <button id="pickFiles" class="primary">上传图片</button>
         <button id="pickJson">导入JSON</button>
@@ -1611,6 +1694,10 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       <iframe id="mockupFrame" class="mockup-frame" src="/mockup" title="套图生成"></iframe>
     </section>
 
+    <section id="listingImportModule" class="module-view listing-import-module hidden" aria-label="商品导入模块">
+      <iframe id="listingImportFrame" class="listing-import-frame" src="/listing-import" title="妙手商品导入助手"></iframe>
+    </section>
+
     <dialog id="elementProductDialog" class="element-product-dialog">
       <div class="element-product-dialog-head">
         <h2>管理 Listing 产品</h2>
@@ -1651,6 +1738,7 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
     const AUTH_ENDPOINT = "/api/auth";
     const TRANS_MODEL_NODE_ENDPOINT = "/api/trans-model-node";
     const DAILY_STATS_ENDPOINT = "/api/daily-stats";
+    const IMAGE_CONCURRENCY_ENDPOINT = "/api/image-concurrency";
     let appLoggedIn = false;
     let appBootstrapped = false;
     const TRANSLATE_ENDPOINT = "/translate-listing";
@@ -1750,6 +1838,7 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
       transModelNodes = Array.isArray(transModelPool.nodes) ? transModelPool.nodes : [];
       activeTransModelNodeId = String(transModelPool.active || "");
       if (el.imageCount) el.imageCount.value = String(runtimeConfig.n);
+      if (el.concurrencyInput) el.concurrencyInput.value = String(runtimeConfig.concurrency);
       // 顶部不再展示 key、模型、张数、并发等敏感/冗余摘要。
       el.configStatus.textContent = "";
       el.configStatus.title = "";
@@ -1877,6 +1966,108 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
         notice(summaryText);
       }
       return summary;
+    }
+
+    // 从一次拖放操作中读取直接拖入的 JSON 文件。
+    function findDroppedKeyFile(dataTransfer) {
+      if (!dataTransfer) return null;
+      const files = dataTransfer.files || [];
+      for (let index = 0; index < files.length; index++) {
+        if (String(files[index].name || "").toLowerCase() === "key.json") return files[index];
+      }
+      for (let index = 0; index < files.length; index++) {
+        if (/\.json$/i.test(String(files[index].name || ""))) return files[index];
+      }
+      return null;
+    }
+
+    // 切换密钥拖放区域的高亮状态。
+    function setKeyDropZoneActive(zone, active) {
+      if (!zone) return;
+      zone.classList.toggle("is-dragging", Boolean(active));
+    }
+
+    // 允许浏览器把文件夹投放到密钥区域。
+    function handleKeyDragOver(event) {
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+      setKeyDropZoneActive(event.currentTarget, true);
+    }
+
+    // 鼠标离开拖放区域时取消高亮。
+    function handleKeyDragLeave(event) {
+      if (event.currentTarget.contains(event.relatedTarget)) return;
+      setKeyDropZoneActive(event.currentTarget, false);
+    }
+
+    // 导入拖放区域中的 key.json，并按入口决定是否进入工作台。
+    async function importDroppedKey(event, fromLogin) {
+      event.preventDefault();
+      setKeyDropZoneActive(event.currentTarget, false);
+      const file = findDroppedKeyFile(event.dataTransfer);
+      if (!file) throw new Error("请直接拖入 key.json 文件");
+      if (fromLogin) setLoginStatus(`正在导入 ${file.name}…`, "");
+      await importKeyFile(file, { fromLogin });
+      if (!fromLogin) {
+        setKeyModifyDialogVisible(false);
+        notice(`密钥已更新：${file.name}`);
+      }
+    }
+
+    // 将并发输入限制在 1 到 10，并返回可用于调度和保存的整数。
+    function selectedConcurrency() {
+      const value = Number(el.concurrencyInput ? el.concurrencyInput.value : runtimeConfig.concurrency);
+      if (!Number.isFinite(value)) return runtimeConfig.concurrency;
+      return Math.max(1, Math.min(10, Math.floor(value)));
+    }
+
+    // 保存用户手动设置的图片生成并发数；当前请求保持不变，后续调度立即使用新值。
+    async function saveConcurrency() {
+      if (!el.concurrencyInput) return;
+      const concurrency = selectedConcurrency();
+      el.concurrencyInput.value = String(concurrency);
+      el.concurrencyInput.disabled = true;
+      try {
+        const response = await fetch(IMAGE_CONCURRENCY_ENDPOINT, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ concurrency })
+        });
+        const text = await response.text();
+        if (!response.ok) throw new Error(text.slice(0, 300));
+        applyConfigSummary(JSON.parse(text));
+        schedule();
+      } catch (error) {
+        el.concurrencyInput.value = String(runtimeConfig.concurrency);
+        notice(`并发设置失败：${error.message}`);
+      } finally {
+        el.concurrencyInput.disabled = false;
+      }
+    }
+
+    // 按回车时提交并发数，同时收起数字输入焦点。
+    function handleConcurrencyKeydown(event) {
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+      el.concurrencyInput.blur();
+    }
+
+    // 首次登录时接收拖入的密钥文件夹。
+    async function handleLoginKeyDrop(event) {
+      try {
+        await importDroppedKey(event, true);
+      } catch (error) {
+        setLoginStatus(`导入失败：${error.message}`, "error");
+      }
+    }
+
+    // 修改密钥时接收拖入的新密钥文件夹。
+    async function handleModifyKeyDrop(event) {
+      try {
+        await importDroppedKey(event, false);
+      } catch (error) {
+        alert(`密钥导入失败：${error.message}`);
+      }
     }
 
     // 启动时：优先用根目录 key.json 自动登录；没有则停在登录页。
@@ -3846,9 +4037,19 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
     if (el.loginImportKey) el.loginImportKey.addEventListener("click", handleLoginImportClick);
     if (el.loginRecheck) el.loginRecheck.addEventListener("click", handleLoginRecheckClick);
     if (el.loginKeyFile) el.loginKeyFile.addEventListener("change", handleLoginKeyFileChange);
+    if (el.loginKeyDrop) {
+      el.loginKeyDrop.addEventListener("dragover", handleKeyDragOver);
+      el.loginKeyDrop.addEventListener("dragleave", handleKeyDragLeave);
+      el.loginKeyDrop.addEventListener("drop", handleLoginKeyDrop);
+    }
     if (el.keyModifyCancel) el.keyModifyCancel.addEventListener("click", handleKeyModifyCancelClick);
     if (el.keyModifyPick) el.keyModifyPick.addEventListener("click", handleKeyModifyPickClick);
     if (el.modifyKeyFile) el.modifyKeyFile.addEventListener("change", handleModifyKeyFileChange);
+    if (el.modifyKeyDrop) {
+      el.modifyKeyDrop.addEventListener("dragover", handleKeyDragOver);
+      el.modifyKeyDrop.addEventListener("dragleave", handleKeyDragLeave);
+      el.modifyKeyDrop.addEventListener("drop", handleModifyKeyDrop);
+    }
     if (el.keyModifyDialog) {
       el.keyModifyDialog.addEventListener("click", (event) => {
         if (event.target === el.keyModifyDialog) setKeyModifyDialogVisible(false);
@@ -3867,6 +4068,10 @@ Make it suitable for apparel, sticker, textile, or product-surface printing. Do 
     if (el.imageCount) {
       el.imageCount.addEventListener("input", handleImageCountChange);
       el.imageCount.addEventListener("blur", handleImageCountBlur);
+    }
+    if (el.concurrencyInput) {
+      el.concurrencyInput.addEventListener("change", saveConcurrency);
+      el.concurrencyInput.addEventListener("keydown", handleConcurrencyKeydown);
     }
     document.querySelectorAll("[data-ratio]").forEach((button) => {
       button.addEventListener("click", () => {
