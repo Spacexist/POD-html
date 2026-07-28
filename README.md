@@ -22,7 +22,7 @@ POD Image Workflow 把 **Temu 图片采集 Chrome 扩展**、**印花重绘**、
 > 自动导入的任务只会进入 **待生成** 状态。只有手动点击“生成”或“批量生成”才会调用 BeeCode，不会因为采集或刷新页面产生费用。
 
 <p align="center">
-  <img src="docs/images/00-architecture.png" alt="POD architecture: extension, local server, three modules, config vs key" width="920">
+  <img src="docs/images/00-architecture.svg" alt="POD architecture: extension, local server, four workflow modules, config vs key" width="920">
 </p>
 
 | 核心能力 | 行为 |
@@ -46,22 +46,36 @@ POD Image Workflow 把 **Temu 图片采集 Chrome 扩展**、**印花重绘**、
 
 <p align="center">
   <img src="docs/images/01-pattern-redraw.png" alt="Module 1 Pattern Redraw workbench" width="920"><br>
-  <sub>模块 1 · 印花重绘：任务列表、提示词、生成控制、节点选择</sub>
+  <sub>模块 1 · 印花重绘：原图与生成图对照、提示词、任务日志、缓存恢复和可调并发</sub>
 </p>
 
 <p align="center">
   <img src="docs/images/02-element-extraction.png" alt="Module 2 Element Extraction workbench" width="920"><br>
-  <sub>模块 2 · 元素提取：目录导入、前后缀 / Listing、结果表与导出</sub>
+  <sub>模块 2 · 元素提取：目录导入、前后缀 / Listing 模式、批量提取和结果导出</sub>
 </p>
 
 <p align="center">
   <img src="docs/images/03-mockup.png" alt="Module 3 Mockup canvas" width="920"><br>
-  <sub>模块 3 · 套图生成：印花组、产品底图 / Mask、画布预览与导出</sub>
+  <sub>模块 3 · 套图生成：产品图 / Mask 模板、印花组、平面与曲面网格、批量渲染导出</sub>
 </p>
 
 <p align="center">
-  <img src="docs/images/06-modules.png" alt="Workflow modules overview diagram" width="920"><br>
-  <sub>Workflow 模块职责一览（模块 4 详见下文）</sub>
+  <img src="docs/images/04-listing-import.png" alt="Module 4 Listing and SKU import workbench" width="920"><br>
+  <sub>模块 4 · 商品导入：Listing 目录识别、公共信息、SKU 组合与妙手上传包导出</sub>
+</p>
+
+### 四模块速览
+
+| 模块 | 输入 | 核心处理 | 输出 / 下一站 |
+|---|---|---|---|
+| 1 · 印花重绘 | 商品原图或导入 JSON | 批量生成、重试、缓存、侵权查询 | 成功图传入模块 2 |
+| 2 · 元素提取 | 模块 1 成功图或本机目录 | 3×3 分组识别、命名组合、人工校对 | 重命名图片传入模块 3 |
+| 3 · 套图生成 | 印花、产品图、蒙版与网格模板 | 平面 / 曲面贴图、Homography 高清渲染 | 按 Listing 批量导出并打开模块 4 |
+| 4 · 商品导入 | 模块 3 导出目录或手动目录 | Listing 预览、SKU 图片分配、商品信息补全 | 妙手可上传的 Excel 与素材 ZIP |
+
+<p align="center">
+  <img src="docs/images/06-workflow.svg" alt="Four-module POD workflow overview" width="920"><br>
+  <sub>从商品图采集到妙手上传包的完整本地 Workflow</sub>
 </p>
 
 ## 工作流程

@@ -1,0 +1,80 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="520" viewBox="0 0 1200 520" role="img" aria-labelledby="title desc">
+  <title id="title">POD Image Workflow 系统架构</title>
+  <desc id="desc">Chrome 扩展连接本地服务，再串联印花重绘、元素提取、套图生成和商品导入四个模块；业务配置和用户密钥分开存放。</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0d1525"/>
+      <stop offset="1" stop-color="#12100f"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ff713b"/>
+      <stop offset="1" stop-color="#ffb347"/>
+    </linearGradient>
+    <marker id="arrow" markerWidth="9" markerHeight="9" refX="7.5" refY="4.5" orient="auto">
+      <path d="M0,0 L9,4.5 L0,9 Z" fill="#72819a"/>
+    </marker>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#000" flood-opacity=".32"/>
+    </filter>
+  </defs>
+
+  <rect width="1200" height="520" rx="24" fill="url(#background)"/>
+  <text x="600" y="53" text-anchor="middle" fill="#f7f7f5" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="29" font-weight="750">POD Image Workflow</text>
+  <text x="600" y="82" text-anchor="middle" fill="#91a0b7" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="14">Local-first · capture → redraw → extract → mockup → listing package</text>
+
+  <g filter="url(#shadow)">
+    <rect x="28" y="130" width="170" height="126" rx="16" fill="#1a2639" stroke="#45c6ff"/>
+    <rect x="222" y="130" width="170" height="126" rx="16" fill="#1a2639" stroke="#9b7cff"/>
+    <rect x="416" y="130" width="170" height="126" rx="16" fill="#1a2639" stroke="#49dfaa"/>
+    <rect x="610" y="130" width="170" height="126" rx="16" fill="#1a2639" stroke="#ffbf2f"/>
+    <rect x="804" y="130" width="170" height="126" rx="16" fill="#1a2639" stroke="#ff6d85"/>
+    <rect x="998" y="130" width="174" height="126" rx="16" fill="#251d19" stroke="#ff713b"/>
+  </g>
+
+  <g fill="#f1f3f7" text-anchor="middle" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="17" font-weight="700">
+    <text x="113" y="169">Chrome 扩展</text>
+    <text x="307" y="169">POD 本地服务</text>
+    <text x="501" y="169">模块 1</text>
+    <text x="695" y="169">模块 2</text>
+    <text x="889" y="169">模块 3</text>
+    <text x="1085" y="169">模块 4</text>
+  </g>
+  <g text-anchor="middle" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="13">
+    <text x="113" y="199" fill="#45c6ff">Temu 商品采集</text>
+    <text x="307" y="199" fill="#ad98ff">127.0.0.1:8787</text>
+    <text x="501" y="199" fill="#49dfaa">印花重绘</text>
+    <text x="695" y="199" fill="#ffbf2f">元素提取</text>
+    <text x="889" y="199" fill="#ff7d91">套图生成</text>
+    <text x="1085" y="199" fill="#ff8b53">商品导入</text>
+  </g>
+  <g fill="#8d9aaf" text-anchor="middle" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="11">
+    <text x="113" y="228">去重 · 离线缓存</text>
+    <text x="307" y="228">SSE · Cache · Proxy</text>
+    <text x="501" y="228">生成 · 恢复</text>
+    <text x="695" y="228">识别 · 命名</text>
+    <text x="889" y="228">网格 · 渲染</text>
+    <text x="1085" y="228">Listing · SKU · ZIP</text>
+  </g>
+
+  <g stroke="#72819a" stroke-width="2" marker-end="url(#arrow)">
+    <path d="M199 193 H215"/>
+    <path d="M393 193 H409"/>
+    <path d="M587 193 H603"/>
+    <path d="M781 193 H797"/>
+    <path d="M975 193 H991"/>
+  </g>
+
+  <text x="42" y="313" fill="#ff7a3d" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="12" font-weight="700" letter-spacing="2">CONFIGURATION BOUNDARY</text>
+  <line x1="42" y1="329" x2="1158" y2="329" stroke="#ffffff" stroke-opacity=".1"/>
+
+  <rect x="190" y="359" width="340" height="112" rx="15" fill="#172131" stroke="#56657d"/>
+  <rect x="670" y="359" width="340" height="112" rx="15" fill="#172131" stroke="#56657d"/>
+  <text x="360" y="400" text-anchor="middle" fill="#edf0f5" font-family="Consolas, monospace" font-size="19" font-weight="700">config.json</text>
+  <text x="360" y="429" text-anchor="middle" fill="#9ba8bb" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="13">业务配置 · 并发 · 节点选择</text>
+  <text x="360" y="452" text-anchor="middle" fill="#49dfaa" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="12">可随项目共享</text>
+  <text x="840" y="400" text-anchor="middle" fill="#edf0f5" font-family="Consolas, monospace" font-size="19" font-weight="700">key.json</text>
+  <text x="840" y="429" text-anchor="middle" fill="#9ba8bb" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="13">用户密钥 · Moonshot · 动态节点</text>
+  <text x="840" y="452" text-anchor="middle" fill="#ffbf2f" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="12">本机私密 · Git 忽略</text>
+
+  <rect x="28" y="495" width="1144" height="2" rx="1" fill="url(#accent)" opacity=".6"/>
+</svg>
